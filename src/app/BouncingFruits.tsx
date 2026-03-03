@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import Image from "next/image";
 
-const SIZE = 80;
-const HITBOX = SIZE * 0.45; // tighter collision radius
-const WALL_INSET = 8;       // pixels of visual padding to ignore at edges
+const SIZE_MIN = 60;
+const SIZE_MAX = 100;
+const HITBOX_RATIO = 0.45;
+const WALL_INSET = 8;
 const SPEED = 2.2;
 const CLICKS_TO_SPAWN = 5;
 const FRUIT_CYCLE = ["lemon", "apple", "banana", "blueberry", "orange"];
@@ -13,12 +13,17 @@ const FRUIT_CYCLE = ["lemon", "apple", "banana", "blueberry", "orange"];
 interface FruitData {
   id: number;
   type: string;
+  size: number;
   x: number;
   y: number;
   vx: number;
   vy: number;
   rotation: number;
   clicks: number;
+}
+
+function randomSize() {
+  return SIZE_MIN + Math.random() * (SIZE_MAX - SIZE_MIN);
 }
 
 function randomDirection(speed: number) {
@@ -42,12 +47,14 @@ export default function BouncingFruits() {
   // initialize with orange
   useEffect(() => {
     const { vx, vy } = randomDirection(SPEED);
+    const size = randomSize();
     fruitsRef.current = [
       {
         id: 0,
         type: "orange",
-        x: Math.random() * (window.innerWidth - SIZE),
-        y: Math.random() * (window.innerHeight - SIZE),
+        size,
+        x: Math.random() * (window.innerWidth - size),
+        y: Math.random() * (window.innerHeight - size),
         vx,
         vy,
         rotation: 0,
@@ -72,8 +79,8 @@ export default function BouncingFruits() {
         f.y += f.vy;
         f.rotation += 1.5;
 
-        if (f.x <= -WALL_INSET || f.x >= w - SIZE + WALL_INSET) {
-          f.x = Math.max(-WALL_INSET, Math.min(f.x, w - SIZE + WALL_INSET));
+        if (f.x <= -WALL_INSET || f.x >= w - f.size + WALL_INSET) {
+          f.x = Math.max(-WALL_INSET, Math.min(f.x, w - f.size + WALL_INSET));
           f.vx = -f.vx;
           f.vy += (Math.random() - 0.5) * SPEED * 0.6;
           const n = normalizeSpeed(f.vx, f.vy, SPEED);
@@ -81,8 +88,8 @@ export default function BouncingFruits() {
           f.vy = n.vy;
         }
 
-        if (f.y <= -WALL_INSET || f.y >= h - SIZE + WALL_INSET) {
-          f.y = Math.max(-WALL_INSET, Math.min(f.y, h - SIZE + WALL_INSET));
+        if (f.y <= -WALL_INSET || f.y >= h - f.size + WALL_INSET) {
+          f.y = Math.max(-WALL_INSET, Math.min(f.y, h - f.size + WALL_INSET));
           f.vy = -f.vy;
           f.vx += (Math.random() - 0.5) * SPEED * 0.6;
           const n = normalizeSpeed(f.vx, f.vy, SPEED);
@@ -97,10 +104,10 @@ export default function BouncingFruits() {
           const a = fruits[i];
           const b = fruits[j];
 
-          const dx = (a.x + SIZE / 2) - (b.x + SIZE / 2);
-          const dy = (a.y + SIZE / 2) - (b.y + SIZE / 2);
+          const dx = (a.x + a.size / 2) - (b.x + b.size / 2);
+          const dy = (a.y + a.size / 2) - (b.y + b.size / 2);
           const dist = Math.sqrt(dx * dx + dy * dy);
-          const minDist = HITBOX;
+          const minDist = (a.size + b.size) / 2 * HITBOX_RATIO;
 
           if (dist < minDist && dist > 0.1) {
             // separate overlapping fruits
@@ -166,11 +173,13 @@ export default function BouncingFruits() {
       spawnIndexRef.current++;
 
       const dir = randomDirection(SPEED);
+      const size = randomSize();
       fruitsRef.current.push({
         id: nextIdRef.current++,
         type,
-        x: Math.random() * (window.innerWidth - SIZE),
-        y: Math.random() * (window.innerHeight - SIZE),
+        size,
+        x: Math.random() * (window.innerWidth - size),
+        y: Math.random() * (window.innerHeight - size),
         vx: dir.vx,
         vy: dir.vy,
         rotation: 0,
@@ -195,15 +204,14 @@ export default function BouncingFruits() {
           }}
           onClick={() => handleClick(fruit.id)}
           className="fixed top-0 left-0 z-0 cursor-pointer"
-          style={{ width: SIZE, height: SIZE, willChange: "transform" }}
+          style={{ width: fruit.size, height: fruit.size, willChange: "transform" }}
         >
-          <Image
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
             src={`/${fruit.type}.png`}
             alt=""
-            width={SIZE}
-            height={SIZE}
             className="w-full h-full object-contain"
-            priority={fruit.id === 0}
+            draggable={false}
           />
         </div>
       ))}

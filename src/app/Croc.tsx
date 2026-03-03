@@ -35,7 +35,7 @@ export default function Croc() {
             fill
             className="object-contain"
           />
-          <span className="absolute inset-0 flex items-center justify-center pr-6 pb-3 font-serif font-bold text-[0.85rem] text-black text-center leading-tight">
+          <span className="absolute inset-0 flex items-center justify-center pr-10 pb-3 font-serif font-bold text-[0.85rem] text-black text-center leading-tight">
             {quote}
           </span>
         </div>
