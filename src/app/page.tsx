@@ -10,7 +10,13 @@ export default function Home() {
       {/* croc mascot */}
       <Croc />
 
-      {/* sandpaper grain */}
+      {/* aged stone patina — large-scale weathering */}
+      <div className="stone-patina" aria-hidden="true" />
+
+      {/* rough stone surface texture */}
+      <div className="stone-texture" aria-hidden="true" />
+
+      {/* fine sand grain */}
       <div className="grain-overlay" aria-hidden="true" />
 
       {/* vignette */}

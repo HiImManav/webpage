@@ -20,11 +20,66 @@
 }
 
 body {
-  background: var(--bg);
+  background:
+    /* heavy sedimentary striations — rough-cut limestone bands */
+    repeating-linear-gradient(
+      178deg,
+      transparent 0px,
+      transparent 28px,
+      rgba(120, 85, 50, 0.18) 28px,
+      rgba(120, 85, 50, 0.18) 31px,
+      transparent 31px,
+      transparent 65px,
+      rgba(100, 70, 38, 0.12) 65px,
+      rgba(100, 70, 38, 0.12) 67px,
+      transparent 67px,
+      transparent 110px,
+      rgba(140, 105, 65, 0.14) 110px,
+      rgba(140, 105, 65, 0.14) 112px,
+      transparent 112px,
+      transparent 145px
+    ),
+    /* secondary striations — offset angle for chisel-mark irregularity */
+    repeating-linear-gradient(
+      179deg,
+      transparent 0px,
+      transparent 15px,
+      rgba(130, 95, 55, 0.09) 15px,
+      rgba(130, 95, 55, 0.09) 16px,
+      transparent 16px,
+      transparent 42px,
+      rgba(110, 78, 42, 0.06) 42px,
+      rgba(110, 78, 42, 0.06) 43px,
+      transparent 43px,
+      transparent 70px
+    ),
+    /* broad geological layers — visible color shifts */
+    repeating-linear-gradient(
+      176deg,
+      transparent 0px,
+      transparent 120px,
+      rgba(145, 108, 65, 0.14) 120px,
+      rgba(145, 108, 65, 0.14) 185px,
+      transparent 185px,
+      transparent 300px
+    ),
+    /* warm amber sandstone base — deep golden tones like torchlit limestone */
+    linear-gradient(
+      175deg,
+      #C4A270 0%,
+      #BA9562 12%,
+      #CDAB78 24%,
+      #B89358 38%,
+      #C6A46E 50%,
+      #B08E55 62%,
+      #CBA870 74%,
+      #B99860 86%,
+      #C2A068 100%
+    );
   color: var(--fg);
 }
 
-/* sandpaper grain animation */
+/* sand grain drift animation */
 @keyframes grain-drift {
   0%, 100% { transform: translate(0, 0); }
   25%      { transform: translate(-2%, 3%); }
@@ -60,7 +115,31 @@ body {
   animation: fade-up 1s ease 0.55s both;
 }
 
-/* sandpaper grain overlay */
+/* aged stone patina — large-scale weathering, dark stains, and worn patches */
+.stone-patina {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.32;
+  mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 1024 1024' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='p'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.012 0.008' numOctaves='3' seed='7' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23p)'/%3E%3C/svg%3E");
+  background-size: 1000px 1000px;
+}
+
+/* rough stone surface — medium-scale organic pattern, directional grain */
+.stone-texture {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.50;
+  mix-blend-mode: soft-light;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 512 512' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='s'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.045 0.028' numOctaves='6' seed='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23s)'/%3E%3C/svg%3E");
+  background-size: 550px 550px;
+}
+
+/* gritty stone grain — coarse sand particles, rough-hewn surface */
 .grain-overlay {
   position: fixed;
   inset: -50%;
@@ -68,23 +147,32 @@ body {
   height: 200%;
   z-index: 1;
   pointer-events: none;
-  opacity: 0.42;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-size: 180px 180px;
+  opacity: 0.45;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 200px 200px;
   animation: grain-drift 6s steps(4) infinite;
 }
 
-/* vignette overlay */
+/* vignette overlay — deep warm shadow like a torchlit stone chamber */
 .vignette-overlay {
   position: fixed;
   inset: 0;
   z-index: 1;
   pointer-events: none;
-  background: radial-gradient(
-    ellipse at center,
-    transparent 55%,
-    rgba(42, 26, 14, 0.15) 100%
-  );
+  background:
+    /* warm amber glow from center — faint torchlight wash */
+    radial-gradient(
+      ellipse at center,
+      rgba(200, 160, 90, 0.06) 0%,
+      transparent 50%
+    ),
+    /* heavy dark vignette — enclosed chamber shadow */
+    radial-gradient(
+      ellipse at center,
+      transparent 35%,
+      rgba(50, 30, 12, 0.22) 70%,
+      rgba(30, 16, 4, 0.45) 100%
+    );
 }
 
 /* link underline hover */
