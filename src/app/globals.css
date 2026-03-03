@@ -1,0 +1,109 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #C8AD8A;
+  --bg-light: #D9C4A0;
+  --fg: #2A1A0E;
+  --fg-dim: #5C4430;
+  --accent: #6B4226;
+  --rule: #9E8468;
+}
+
+@theme inline {
+  --color-background: var(--bg);
+  --color-foreground: var(--fg);
+  --color-fg-dim: var(--fg-dim);
+  --color-accent: var(--accent);
+  --color-rule: var(--rule);
+  --font-serif: var(--font-old-standard);
+  --font-mono: var(--font-cutive);
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+/* sandpaper grain animation */
+@keyframes grain-drift {
+  0%, 100% { transform: translate(0, 0); }
+  25%      { transform: translate(-2%, 3%); }
+  50%      { transform: translate(1%, -2%); }
+  75%      { transform: translate(3%, 1%); }
+}
+
+/* staggered fade-up entrance */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 1s ease both;
+}
+
+.animate-fade-up-1 {
+  animation: fade-up 1s ease 0.2s both;
+}
+
+.animate-fade-up-2 {
+  animation: fade-up 1s ease 0.35s both;
+}
+
+.animate-fade-up-3 {
+  animation: fade-up 1s ease 0.55s both;
+}
+
+/* sandpaper grain overlay */
+.grain-overlay {
+  position: fixed;
+  inset: -50%;
+  width: 200%;
+  height: 200%;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.42;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-size: 180px 180px;
+  animation: grain-drift 6s steps(4) infinite;
+}
+
+/* vignette overlay */
+.vignette-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse at center,
+    transparent 55%,
+    rgba(42, 26, 14, 0.15) 100%
+  );
+}
+
+/* link underline hover */
+.link-rustic {
+  position: relative;
+  padding-bottom: 2px;
+}
+
+.link-rustic::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 0;
+  height: 1px;
+  background: var(--accent);
+  transition: width 0.3s ease;
+}
+
+.link-rustic:hover::after {
+  width: 100%;
+}
