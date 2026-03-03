@@ -4,6 +4,8 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import Image from "next/image";
 
 const SIZE = 80;
+const HITBOX = SIZE * 0.45; // tighter collision radius
+const WALL_INSET = 8;       // pixels of visual padding to ignore at edges
 const SPEED = 2.2;
 const CLICKS_TO_SPAWN = 5;
 const FRUIT_CYCLE = ["lemon", "apple", "banana", "blueberry", "orange"];
@@ -70,8 +72,8 @@ export default function BouncingFruits() {
         f.y += f.vy;
         f.rotation += 1.5;
 
-        if (f.x <= 0 || f.x >= w - SIZE) {
-          f.x = Math.max(0, Math.min(f.x, w - SIZE));
+        if (f.x <= -WALL_INSET || f.x >= w - SIZE + WALL_INSET) {
+          f.x = Math.max(-WALL_INSET, Math.min(f.x, w - SIZE + WALL_INSET));
           f.vx = -f.vx;
           f.vy += (Math.random() - 0.5) * SPEED * 0.6;
           const n = normalizeSpeed(f.vx, f.vy, SPEED);
@@ -79,8 +81,8 @@ export default function BouncingFruits() {
           f.vy = n.vy;
         }
 
-        if (f.y <= 0 || f.y >= h - SIZE) {
-          f.y = Math.max(0, Math.min(f.y, h - SIZE));
+        if (f.y <= -WALL_INSET || f.y >= h - SIZE + WALL_INSET) {
+          f.y = Math.max(-WALL_INSET, Math.min(f.y, h - SIZE + WALL_INSET));
           f.vy = -f.vy;
           f.vx += (Math.random() - 0.5) * SPEED * 0.6;
           const n = normalizeSpeed(f.vx, f.vy, SPEED);
@@ -98,9 +100,9 @@ export default function BouncingFruits() {
           const dx = (a.x + SIZE / 2) - (b.x + SIZE / 2);
           const dy = (a.y + SIZE / 2) - (b.y + SIZE / 2);
           const dist = Math.sqrt(dx * dx + dy * dy);
-          const minDist = SIZE * 0.75;
+          const minDist = HITBOX;
 
-          if (dist < minDist && dist > 0) {
+          if (dist < minDist && dist > 0.1) {
             // separate overlapping fruits
             const nx = dx / dist;
             const ny = dy / dist;
@@ -134,6 +136,15 @@ export default function BouncingFruits() {
 
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
+  }, []);
+
+  const handleReset = useCallback(() => {
+    const orange = fruitsRef.current.find((f) => f.id === 0);
+    if (!orange) return;
+    orange.clicks = 0;
+    fruitsRef.current = [orange];
+    spawnIndexRef.current = 0;
+    setVersion((v) => v + 1);
   }, []);
 
   const handleClick = useCallback((id: number) => {
@@ -171,6 +182,8 @@ export default function BouncingFruits() {
     }
   }, []);
 
+  const fruitCount = fruitsRef.current.length;
+
   return (
     <>
       {fruitsRef.current.map((fruit) => (
@@ -194,6 +207,15 @@ export default function BouncingFruits() {
           />
         </div>
       ))}
+
+      {fruitCount > 5 && (
+        <button
+          onClick={handleReset}
+          className="fixed bottom-6 left-6 z-10 font-mono text-[0.75rem] tracking-[0.06em] lowercase px-4 py-2 bg-[var(--fg)] text-[var(--bg)] cursor-pointer rounded-none border-0 opacity-60 hover:opacity-100 transition-opacity"
+        >
+          reset fruits
+        </button>
+      )}
     </>
   );
 }

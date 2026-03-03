@@ -1,10 +1,14 @@
 import BouncingFruits from "./BouncingFruits";
+import Croc from "./Croc";
 
 export default function Home() {
   return (
     <div className="relative flex flex-1 items-center justify-center overflow-hidden">
       {/* bouncing fruits — behind everything */}
       <BouncingFruits />
+
+      {/* croc mascot */}
+      <Croc />
 
       {/* sandpaper grain */}
       <div className="grain-overlay" aria-hidden="true" />
