@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+/* hide scrollbars but keep scrolling */
+.scrollbar-hidden {
+  scrollbar-width: none;          /* Firefox */
+  -ms-overflow-style: none;       /* IE/Edge */
+}
+.scrollbar-hidden::-webkit-scrollbar {
+  display: none;                  /* Chrome/Safari */
+}
+
 :root {
   --bg: #C8AD8A;
   --bg-light: #D9C4A0;
@@ -62,6 +71,20 @@ body {
       rgba(145, 108, 65, 0.14) 185px,
       transparent 185px,
       transparent 300px
+    ),
+    /* sparse vertical cracks — stone block joints and fissures */
+    repeating-linear-gradient(
+      91deg,
+      transparent 0px,
+      transparent 180px,
+      rgba(105, 72, 38, 0.10) 180px,
+      rgba(105, 72, 38, 0.10) 182px,
+      transparent 182px,
+      transparent 420px,
+      rgba(90, 60, 30, 0.06) 420px,
+      rgba(90, 60, 30, 0.06) 421px,
+      transparent 421px,
+      transparent 600px
     ),
     /* warm amber sandstone base — deep golden tones like torchlit limestone */
     linear-gradient(
