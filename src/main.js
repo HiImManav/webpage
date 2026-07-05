@@ -615,21 +615,22 @@ let bellAmp = 0;
 let bellPhase = 0;
 let audioCtx = null;
 
-// play a set of decaying sine partials: [frequency, gain, duration]
+// play a set of decaying sine partials: [frequency, gain, duration, delay]
+// the optional delay (seconds) lets callers schedule arpeggios and melodies
 function playPartials(partials) {
   try {
     audioCtx ??= new (window.AudioContext || window.webkitAudioContext)();
     const t0 = audioCtx.currentTime;
-    for (const [freq, gain, dur] of partials) {
+    for (const [freq, gain, dur, delay = 0] of partials) {
       const osc = audioCtx.createOscillator();
       const g = audioCtx.createGain();
       osc.type = 'sine';
       osc.frequency.value = freq;
-      g.gain.setValueAtTime(gain, t0);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      g.gain.setValueAtTime(gain, t0 + delay);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + delay + dur);
       osc.connect(g).connect(audioCtx.destination);
-      osc.start(t0);
-      osc.stop(t0 + dur);
+      osc.start(t0 + delay);
+      osc.stop(t0 + delay + dur);
     }
   } catch {
     // no audio available — things still swing silently
@@ -929,6 +930,276 @@ addMazeRing(5.8, 'S');
 addMazeRing(3.6, 'N');
 scene.add(new THREE.Mesh(mergeGeometries(mazeWallGeometries), towerMaterial));
 
+// ---------- where the color lives ----------
+// The architecture of the void is monochrome, by law. Color only exists
+// in living things: the aurora, the garden, the fireflies, the prism's
+// light, the passing comet. Inverting the world does not touch them.
+
+// --- the aurora ---
+// three ribbons of light waving high behind the leaning tower
+
+const auroraTime = { value: 0 };
+
+function addAuroraRibbon(y, z, phase, colorA, colorB) {
+  const material = new THREE.ShaderMaterial({
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    uniforms: {
+      uTime: auroraTime, // shared — one update animates all ribbons
+      uPhase: { value: phase },
+      uColorA: { value: new THREE.Color(colorA) },
+      uColorB: { value: new THREE.Color(colorB) },
+    },
+    vertexShader: `
+      uniform float uTime;
+      uniform float uPhase;
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        vec3 p = position;
+        p.y += sin(p.x * 0.12 + uTime * 0.6 + uPhase) * 1.8
+             + sin(p.x * 0.045 - uTime * 0.25 + uPhase * 2.0) * 2.6;
+        p.z += sin(p.x * 0.08 + uTime * 0.4 + uPhase) * 1.5;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
+      }`,
+    fragmentShader: `
+      uniform float uTime;
+      uniform float uPhase;
+      uniform vec3 uColorA;
+      uniform vec3 uColorB;
+      varying vec2 vUv;
+      void main() {
+        vec3 color = mix(uColorA, uColorB, vUv.x);
+        float edge = sin(vUv.y * 3.14159);
+        float shimmer = 0.65 + 0.35 * sin(vUv.x * 18.0 + uTime * 1.4 + uPhase);
+        gl_FragColor = vec4(color, edge * shimmer * 0.45);
+      }`,
+  });
+  const ribbon = new THREE.Mesh(new THREE.PlaneGeometry(90, 5, 96, 6), material);
+  ribbon.position.set(0, y, z);
+  ribbon.frustumCulled = false; // the shader waves verts outside the base bounds
+  scene.add(ribbon);
+}
+
+addAuroraRibbon(29, -52, 0, 0x27e0b8, 0x7a5cff);
+addAuroraRibbon(32, -55, 2.4, 0x7a5cff, 0xff5ca8);
+addAuroraRibbon(26.5, -49, 4.8, 0x27e0b8, 0xffd873);
+
+// --- the glass garden ---
+// a patch of small colored crystals; fog hides it until you come close
+
+const GARDEN = { x: -46, z: -8, radius: 6 };
+const GARDEN_COLORS = [0x27e0b8, 0x7a5cff, 0xff5ca8, 0xffd873, 0x5cc8ff];
+
+{
+  const COUNT = 120;
+  const crystals = new THREE.InstancedMesh(
+    new THREE.ConeGeometry(0.12, 0.55, 5),
+    new THREE.MeshBasicMaterial(),
+    COUNT
+  );
+  const dummy = new THREE.Object3D();
+  const color = new THREE.Color();
+  for (let i = 0; i < COUNT; i++) {
+    const r = Math.sqrt(Math.abs(jitter(i))) * GARDEN.radius;
+    const angle = jitter(i + 200) * Math.PI;
+    const scale = 0.6 + Math.abs(jitter(i + 400)) * 1.3;
+    dummy.position.set(
+      GARDEN.x + Math.cos(angle) * r,
+      (0.55 / 2) * scale,
+      GARDEN.z + Math.sin(angle) * r
+    );
+    dummy.rotation.set(jitter(i + 600) * 0.15, jitter(i + 800) * Math.PI, jitter(i + 1000) * 0.15);
+    dummy.scale.setScalar(scale);
+    dummy.updateMatrix();
+    crystals.setMatrixAt(i, dummy.matrix);
+    color.setHex(GARDEN_COLORS[Math.abs(Math.round(jitter(i + 1200) * 100)) % GARDEN_COLORS.length]);
+    color.multiplyScalar(0.7 + Math.abs(jitter(i + 1400)) * 0.3);
+    crystals.setColorAt(i, color);
+  }
+  crystals.frustumCulled = false; // instances span the patch, not the cone
+  scene.add(crystals);
+}
+
+// the garden's plaque
+{
+  const plaque = new THREE.Mesh(
+    mergeGeometries([
+      new THREE.BoxGeometry(0.2, 0.7, 0.2).translate(0, 0.35, 0),
+      new THREE.BoxGeometry(0.8, 0.06, 0.55).rotateX(-0.42).translate(0, 0.75, 0),
+    ]),
+    towerMaterial
+  );
+  plaque.position.set(GARDEN.x + GARDEN.radius + 1.2, 0, GARDEN.z + 2);
+  plaque.rotation.y = -Math.PI / 3;
+  scene.add(plaque);
+  COLLIDERS.push({ x: GARDEN.x + GARDEN.radius + 1.2, z: GARDEN.z + 2, hw: 0.35, hd: 0.35 });
+  CLICKABLES.push({
+    object: plaque,
+    text: [
+      'THE GLASS GARDEN',
+      '',
+      'The void is monochrome, by law.',
+      'The garden never signed.',
+      '',
+      'Color grows here quietly, tended',
+      'by seventy small lights that have',
+      'somewhere better to be, and stay',
+      'anyway.',
+    ].join('\n'),
+  });
+}
+
+// fireflies over the garden
+const FIREFLY_COUNT = 70;
+const fireflyAngle = new Float32Array(FIREFLY_COUNT);
+const fireflyRadius = new Float32Array(FIREFLY_COUNT);
+const fireflyHeight = new Float32Array(FIREFLY_COUNT);
+const fireflySpeed = new Float32Array(FIREFLY_COUNT);
+const firefliesGeometry = new THREE.BufferGeometry();
+{
+  const positions = new Float32Array(FIREFLY_COUNT * 3);
+  const colors = new Float32Array(FIREFLY_COUNT * 3);
+  const color = new THREE.Color();
+  for (let i = 0; i < FIREFLY_COUNT; i++) {
+    fireflyAngle[i] = jitter(i + 30) * Math.PI;
+    fireflyRadius[i] = 1 + Math.abs(jitter(i + 60)) * (GARDEN.radius - 0.5);
+    fireflyHeight[i] = Math.abs(jitter(i + 90)) * 2.2;
+    fireflySpeed[i] = 0.15 + Math.abs(jitter(i + 120)) * 0.5;
+    color.setHex(GARDEN_COLORS[i % GARDEN_COLORS.length]);
+    colors[i * 3] = color.r;
+    colors[i * 3 + 1] = color.g;
+    colors[i * 3 + 2] = color.b;
+  }
+  firefliesGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  firefliesGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+}
+const fireflies = new THREE.Points(
+  firefliesGeometry,
+  new THREE.PointsMaterial({ size: 0.16, vertexColors: true, transparent: true, opacity: 0.9 })
+);
+fireflies.frustumCulled = false;
+scene.add(fireflies);
+
+// --- the prism ---
+// hovers above the low-gravity crater, tinting the floating shards.
+// The crater's weak gravity is exactly enough to jump up and touch it.
+
+const PRISM = { x: CRATER.x, y: 7.2, z: CRATER.z };
+
+const prism = new THREE.Mesh(
+  new THREE.OctahedronGeometry(0.9),
+  new THREE.MeshStandardMaterial({
+    color: 0x9fd8ff,
+    emissive: 0x3377aa,
+    emissiveIntensity: 0.6,
+    transparent: true,
+    opacity: 0.75,
+    flatShading: true,
+    fog: false,
+  })
+);
+prism.position.set(PRISM.x, PRISM.y, PRISM.z);
+scene.add(prism);
+
+const prismLight = new THREE.PointLight(0x66bbff, 40, 26, 2);
+prismLight.position.copy(prism.position);
+scene.add(prismLight);
+
+let prismFlare = 0;
+let prismCooldownUntil = 0;
+
+// --- the comet ---
+// crosses the whole sky every half minute or so
+
+const COMET_START = new THREE.Vector3(-75, 32, -30);
+const COMET_END = new THREE.Vector3(75, 24, 25);
+const COMET_PERIOD = 34;
+const COMET_TRAVEL = 4.5;
+
+const comet = new THREE.Group();
+{
+  const head = new THREE.Mesh(
+    new THREE.SphereGeometry(0.35, 10, 10),
+    new THREE.MeshBasicMaterial({ color: 0xffd873, fog: false })
+  );
+  const tail = new THREE.Mesh(
+    new THREE.ConeGeometry(0.28, 6.5, 8),
+    new THREE.MeshBasicMaterial({
+      color: 0xffb84d,
+      transparent: true,
+      opacity: 0.45,
+      fog: false,
+    })
+  );
+  const dir = COMET_END.clone().sub(COMET_START).normalize();
+  tail.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+  tail.position.copy(dir.clone().multiplyScalar(-3.4));
+  comet.add(head, tail);
+}
+comet.visible = false;
+scene.add(comet);
+
+// --- the music box ---
+// on the path to the graveyard. Click it: the lid opens and it plays a
+// small lullaby that is never quite the same twice.
+
+const MUSICBOX = { x: 18, z: -2 };
+let musicBoxUntil = -1;
+let musicBoxLid;
+
+{
+  const body = new THREE.Mesh(
+    mergeGeometries([
+      new THREE.BoxGeometry(0.18, 0.9, 0.18).translate(0, 0.45, 0), // post
+      new THREE.BoxGeometry(0.7, 0.4, 0.55).translate(0, 1.1, 0), // box
+      new THREE.CylinderGeometry(0.05, 0.05, 0.22, 8)
+        .rotateZ(Math.PI / 2)
+        .translate(0.46, 1.1, 0), // crank
+    ]),
+    towerMaterial
+  );
+  const musicBox = new THREE.Group();
+  musicBox.add(body);
+  musicBox.position.set(MUSICBOX.x, 0, MUSICBOX.z);
+  musicBox.rotation.y = -0.5; // angled toward the path
+  scene.add(musicBox);
+  COLLIDERS.push({ x: MUSICBOX.x, z: MUSICBOX.z, hw: 0.4, hd: 0.35 });
+
+  const lidPivot = new THREE.Group();
+  lidPivot.position.set(0, 1.3, -0.275); // hinge along the back edge
+  const lid = new THREE.Mesh(
+    new THREE.BoxGeometry(0.72, 0.06, 0.57),
+    towerMaterial
+  );
+  lid.position.set(0, 0.03, 0.275);
+  lidPivot.add(lid);
+  musicBox.add(lidPivot);
+  musicBoxLid = lidPivot;
+
+  const SCALE_NOTES = [220, 261.63, 293.66, 329.63, 392, 440];
+  CLICKABLES.push({
+    object: musicBox,
+    onClick: () => {
+      // a short random walk over a pentatonic scale
+      const notes = [];
+      let step = 3;
+      for (let i = 0; i < 9; i++) {
+        step = Math.min(
+          SCALE_NOTES.length - 1,
+          Math.max(0, step + Math.round((Math.random() - 0.5) * 3))
+        );
+        const freq = SCALE_NOTES[step];
+        notes.push([freq, 0.07, 1.3, i * 0.3]);
+        notes.push([freq * 2, 0.015, 0.8, i * 0.3]); // faint octave sparkle
+      }
+      playPartials(notes);
+      musicBoxUntil = clock.elapsedTime + 3.4;
+    },
+  });
+}
+
 const pedestal = new THREE.Mesh(
   new THREE.CylinderGeometry(1.0, 1.1, 1.0, 20),
   towerMaterial
@@ -994,6 +1265,14 @@ diorama.position.set(MAZE.x, 1.02, MAZE.z);
   );
   miniPool.position.set(0, 0.055, 0);
   diorama.add(miniPool);
+
+  // the one speck of color in the miniature, faithful to the garden
+  const miniGarden = new THREE.Mesh(
+    new THREE.BoxGeometry(0.12, 0.03, 0.12),
+    new THREE.MeshBasicMaterial({ color: 0x27e0b8 })
+  );
+  miniGarden.position.set(-46 * S, 0.06, -8 * S);
+  diorama.add(miniGarden);
 }
 const miniYou = new THREE.Mesh(
   new THREE.BoxGeometry(0.06, 0.09, 0.06),
@@ -1394,6 +1673,57 @@ renderer.setAnimationLoop(() => {
   miniYou.position.set(pos.x * MINI_SCALE, 0.1, pos.z * MINI_SCALE);
   miniYou.scale.setScalar(1 + Math.sin(t * 5) * 0.25);
 
+  // aurora ribbons share one clock
+  auroraTime.value = t;
+
+  // fireflies swirl over the glass garden
+  {
+    const arr = firefliesGeometry.attributes.position.array;
+    for (let i = 0; i < FIREFLY_COUNT; i++) {
+      const angle = fireflyAngle[i] + t * fireflySpeed[i];
+      arr[i * 3] = GARDEN.x + Math.cos(angle) * fireflyRadius[i];
+      arr[i * 3 + 1] = 0.7 + fireflyHeight[i] + Math.sin(t * 0.9 + i) * 0.35;
+      arr[i * 3 + 2] = GARDEN.z + Math.sin(angle) * fireflyRadius[i];
+    }
+    firefliesGeometry.attributes.position.needsUpdate = true;
+  }
+
+  // the prism spins, bobs, and flares when touched mid-jump
+  prism.rotation.y = t * 0.5;
+  prism.rotation.x = t * 0.23;
+  prism.position.y = PRISM.y + Math.sin(t * 0.7) * 0.3;
+  prismLight.position.copy(prism.position);
+  if (prismFlare > 0.01) prismFlare *= Math.exp(-2.2 * delta);
+  prismLight.intensity = 40 + prismFlare * 100;
+  prism.scale.setScalar(1 + prismFlare * 0.25);
+  if (
+    t > prismCooldownUntil &&
+    camera.position.distanceTo(prism.position) < 2.3
+  ) {
+    prismFlare = 1;
+    prismCooldownUntil = t + 2.5;
+    playPartials([
+      [523.25, 0.09, 1.6, 0],
+      [659.25, 0.08, 1.6, 0.09],
+      [783.99, 0.08, 1.6, 0.18],
+      [1046.5, 0.07, 2.0, 0.27],
+    ]);
+  }
+
+  // the comet crosses, then waits
+  {
+    const phase = (t % COMET_PERIOD) / COMET_TRAVEL;
+    comet.visible = phase <= 1;
+    if (comet.visible) {
+      comet.position.lerpVectors(COMET_START, COMET_END, phase);
+    }
+  }
+
+  // music box lid eases open while the lullaby plays
+  const lidTarget = t < musicBoxUntil ? -0.95 : 0;
+  musicBoxLid.rotation.x +=
+    (lidTarget - musicBoxLid.rotation.x) * Math.min(1, 8 * delta);
+
   // motes drift upward and wrap
   {
     const arr = motesGeometry.attributes.position.array;
@@ -1436,6 +1766,9 @@ if (window.location.hash === '#debug') {
       watcherYaws: watcherPivots.map((w) => +w.rotation.y.toFixed(3)),
       drawCalls: renderer.info.render.calls,
       frame: renderer.info.render.frame,
+      cometVisible: comet.visible,
+      lidAngle: +musicBoxLid.rotation.x.toFixed(2),
+      t: +clock.elapsedTime.toFixed(1),
     }),
   };
 
