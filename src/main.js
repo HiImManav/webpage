@@ -21,6 +21,8 @@ const settings = {
   jumpVelocity: 9,
   gravity: 26,
   dashImpulse: 42, // air dash burst (damping eats it: distance ≈ impulse/damping)
+  dashBounceHop: 4.5, // landing soon after a dash skips like a stone
+  dashBounceBoost: 20, // forward push carried by the skip
   // look
   sensitivity: 0.0022,
   invertY: false,
@@ -2277,6 +2279,8 @@ let bobPhase = 0;
 let airJumpsLeft = 1; // double jump charge, refilled on landing
 let airDashLeft = 1; // air dash charge, refilled on landing
 let dashFovPulse = 0;
+let dashBounceUntil = 0; // land before this and the landing becomes a skip
+let dashBounces = 0;
 
 // highest platform top under (x, z) that is not above refY — the floor
 // (0) is always a candidate. Platforms are one-way: you land on tops,
@@ -2373,6 +2377,7 @@ renderer.setAnimationLoop(() => {
     velocity.z += settings.dashImpulse;
     verticalVelocity *= 0.4;
     dashFovPulse = 7;
+    dashBounceUntil = t + 1.5; // touch down inside this window to skip
     playPartials([
       [320, 0.08, 0.25],
       [210, 0.06, 0.3, 0.03], // whoosh
@@ -2395,10 +2400,23 @@ renderer.setAnimationLoop(() => {
         : 0;
     if (feetY <= support) {
       feetY = support;
-      verticalVelocity = 0;
-      grounded = true;
-      airJumpsLeft = 1;
+      airJumpsLeft = 1; // a landing is a landing, even a brief one
       airDashLeft = 1;
+      if (t < dashBounceUntil) {
+        // a dash landing skips like a stone: pop up, push forward.
+        // Charges just refilled, so dashing again mid-skip chains.
+        dashBounceUntil = 0;
+        dashBounces++;
+        verticalVelocity = settings.dashBounceHop;
+        velocity.z += settings.dashBounceBoost;
+        playPartials([
+          [240, 0.06, 0.15],
+          [320, 0.045, 0.12, 0.05], // skip
+        ]);
+      } else {
+        verticalVelocity = 0;
+        grounded = true;
+      }
     }
   }
 
@@ -2735,6 +2753,7 @@ if (window.location.hash === '#debug') {
       stonesVisited: visitedStones.size,
       airJumpsLeft,
       airDashLeft,
+      dashBounces,
       dragonExcite: +dragonExcite.toFixed(2),
       dragonPos: dragonHead.position.toArray().map((v) => +v.toFixed(1)),
       cerberusHeadPos: cerberusHeads.map((h) =>
@@ -2760,6 +2779,8 @@ if (window.location.hash === '#debug') {
     movement.add(settings, 'jumpVelocity', 3, 20, 0.5);
     movement.add(settings, 'gravity', 5, 60, 1);
     movement.add(settings, 'dashImpulse', 10, 100, 1);
+    movement.add(settings, 'dashBounceHop', 0, 12, 0.5);
+    movement.add(settings, 'dashBounceBoost', 0, 60, 1);
 
     const look = gui.addFolder('look');
     look.add(settings, 'sensitivity', 0.0005, 0.01, 0.0001);
