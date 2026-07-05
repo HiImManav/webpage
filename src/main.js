@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { Reflector } from 'three/addons/objects/Reflector.js';
 
 // ---------- world constants ----------
 
@@ -609,16 +610,12 @@ let bellAmp = 0;
 let bellPhase = 0;
 let audioCtx = null;
 
-function chime() {
+// play a set of decaying sine partials: [frequency, gain, duration]
+function playPartials(partials) {
   try {
     audioCtx ??= new (window.AudioContext || window.webkitAudioContext)();
     const t0 = audioCtx.currentTime;
-    // a soft synthetic bell: fundamental plus two decaying partials
-    for (const [freq, gain, dur] of [
-      [523.25, 0.12, 2.4],
-      [783.99, 0.05, 1.6],
-      [1567.98, 0.025, 0.9],
-    ]) {
+    for (const [freq, gain, dur] of partials) {
       const osc = audioCtx.createOscillator();
       const g = audioCtx.createGain();
       osc.type = 'sine';
@@ -630,8 +627,17 @@ function chime() {
       osc.stop(t0 + dur);
     }
   } catch {
-    // no audio available — the bell still swings
+    // no audio available — things still swing silently
   }
+}
+
+function chime() {
+  // a soft synthetic bell: fundamental plus two decaying partials
+  playPartials([
+    [523.25, 0.12, 2.4],
+    [783.99, 0.05, 1.6],
+    [1567.98, 0.025, 0.9],
+  ]);
 }
 
 CLICKABLES.push({
@@ -705,6 +711,299 @@ const motesMaterial = new THREE.PointsMaterial({
 });
 const motes = new THREE.Points(motesGeometry, motesMaterial);
 scene.add(motes);
+
+// --- the still pool ---
+// a true mirror at the center of the world. From its north rim the
+// leaning tower hangs upside down in the floor.
+
+const pool = new Reflector(new THREE.CircleGeometry(5.5, 48), {
+  clipBias: 0.003,
+  textureWidth: 1024,
+  textureHeight: 1024,
+  color: 0x777777,
+});
+pool.rotation.x = -Math.PI / 2;
+pool.position.set(0, 0.02, 0);
+scene.add(pool);
+
+const poolRim = new THREE.Mesh(
+  new THREE.TorusGeometry(5.7, 0.09, 10, 64),
+  towerMaterial
+);
+poolRim.rotation.x = -Math.PI / 2;
+poolRim.position.set(0, 0.05, 0);
+scene.add(poolRim);
+
+// --- the oracle lectern ---
+// stands at the pool's edge. Every reading is different.
+
+const ORACLE = [
+  'The tower leans a little more each time you look away.',
+  'The croc does not know it is a ghost. Do not tell it.',
+  'The word in the sky is not for you. It is for whoever comes after.',
+  'The bell has rung exactly once more than you have rung it.',
+  'Behind the white door: everything, inverted. Including you.',
+  'The moon is caged so it cannot follow you home.',
+  'The stairs are climbable. The builder simply never finished the first step.',
+  'Somewhere in the miniature, a smaller you reads a smaller fortune.',
+  'The dust rises because it remembers being stars.',
+  'There is no exit. There is also no entrance. And yet.',
+];
+let oracleIndex = Math.floor(Math.random() * ORACLE.length);
+
+{
+  const lectern = new THREE.Group();
+  const post = new THREE.Mesh(
+    new THREE.BoxGeometry(0.25, 1.15, 0.25),
+    towerMaterial
+  );
+  post.position.y = 0.58;
+  const top = new THREE.Mesh(
+    new THREE.BoxGeometry(0.95, 0.08, 0.7),
+    towerMaterial
+  );
+  top.position.y = 1.22;
+  top.rotation.x = -0.38; // reading slant
+  lectern.add(post, top);
+  lectern.position.set(6.2, 0, 3.2);
+  lectern.rotation.y = Math.PI / 3; // angled toward the pool
+  scene.add(lectern);
+  COLLIDERS.push({ x: 6.2, z: 3.2, hw: 0.4, hd: 0.4 });
+  CLICKABLES.push({
+    object: lectern,
+    onClick: () => {
+      oracleIndex = (oracleIndex + 1) % ORACLE.length;
+      openParchment(`The lectern whispers:\n\n“${ORACLE[oracleIndex]}”`);
+    },
+  });
+}
+
+// --- the wind chimes ---
+// five hanging tubes, tuned pentatonic. Click to play them.
+
+const CHIMES = { x: -14, z: 38 };
+const CHIME_NOTES = [392.0, 440.0, 523.25, 587.33, 659.25]; // G A C D E
+const chimeTubes = [];
+
+{
+  const postGeometry = new THREE.BoxGeometry(0.3, 3.3, 0.3);
+  for (const side of [-1, 1]) {
+    const post = new THREE.Mesh(postGeometry, towerMaterial);
+    post.position.set(CHIMES.x + side * 1.7, 1.65, CHIMES.z);
+    scene.add(post);
+    COLLIDERS.push({
+      x: CHIMES.x + side * 1.7,
+      z: CHIMES.z,
+      hw: 0.15,
+      hd: 0.15,
+    });
+  }
+  const bar = new THREE.Mesh(
+    new THREE.BoxGeometry(3.7, 0.22, 0.22),
+    towerMaterial
+  );
+  bar.position.set(CHIMES.x, 3.35, CHIMES.z);
+  scene.add(bar);
+
+  CHIME_NOTES.forEach((freq, i) => {
+    const length = 2.1 - i * 0.2; // shorter tube, higher note
+    const pivot = new THREE.Group();
+    pivot.position.set(CHIMES.x - 1.2 + i * 0.6, 3.24, CHIMES.z);
+    const tube = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.07, 0.07, length, 10),
+      bellMaterial
+    );
+    tube.position.y = -length / 2;
+    pivot.add(tube);
+    scene.add(pivot);
+    const entry = { pivot, amp: 0, phase: 0 };
+    chimeTubes.push(entry);
+    CLICKABLES.push({
+      object: pivot,
+      onClick: () => {
+        entry.amp = 0.4;
+        entry.phase = 0;
+        playPartials([
+          [freq, 0.09, 1.8],
+          [freq * 2.756, 0.02, 0.7], // chime-bar overtone
+        ]);
+      },
+    });
+  });
+}
+
+// --- the low-gravity crater ---
+// inside the ring, gravity loosens its grip. Shards of the floor float
+// in a slow orbit overhead.
+
+const CRATER = { x: 42, z: -38, radius: 9 };
+
+const craterRim = new THREE.Mesh(
+  new THREE.TorusGeometry(CRATER.radius, 0.12, 10, 72),
+  towerMaterial
+);
+craterRim.rotation.x = -Math.PI / 2;
+craterRim.position.set(CRATER.x, 0.05, CRATER.z);
+scene.add(craterRim);
+
+const craterSpin = new THREE.Group();
+craterSpin.position.set(CRATER.x, 0, CRATER.z);
+for (let i = 0; i < 8; i++) {
+  const angle = (i / 8) * Math.PI * 2;
+  const shard = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(0.35, 0),
+    towerMaterial
+  );
+  shard.position.set(Math.cos(angle) * 6.5, 2.6, Math.sin(angle) * 6.5);
+  craterSpin.add(shard);
+}
+scene.add(craterSpin);
+
+// --- the labyrinth and the living miniature ---
+// a spiral labyrinth: three square rings, one gap each, alternating
+// sides. At the center, a pedestal carries a miniature of this world —
+// including a small gray you, moving as you move.
+
+const MAZE = { x: -32, z: 40 };
+
+function wallBox(cx, cz, sx, sz) {
+  const wall = new THREE.Mesh(
+    new THREE.BoxGeometry(sx, 2.4, sz),
+    towerMaterial
+  );
+  wall.position.set(cx, 1.2, cz);
+  scene.add(wall);
+  COLLIDERS.push({ x: cx, z: cz, hw: sx / 2, hd: sz / 2 });
+}
+
+function addMazeRing(half, gapSide) {
+  const T = 0.35;
+  const gap = 1.7;
+  const segLen = half - gap / 2;
+  const segOff = gap / 2 + segLen / 2;
+  for (const [side, horizontal, sign] of [
+    ['N', true, -1],
+    ['S', true, 1],
+    ['W', false, -1],
+    ['E', false, 1],
+  ]) {
+    if (horizontal) {
+      const z = MAZE.z + sign * half;
+      if (side === gapSide) {
+        wallBox(MAZE.x - segOff, z, segLen, T);
+        wallBox(MAZE.x + segOff, z, segLen, T);
+      } else {
+        wallBox(MAZE.x, z, half * 2 + T, T);
+      }
+    } else {
+      const x = MAZE.x + sign * half;
+      if (side === gapSide) {
+        wallBox(x, MAZE.z - segOff, T, segLen);
+        wallBox(x, MAZE.z + segOff, T, segLen);
+      } else {
+        wallBox(x, MAZE.z, T, half * 2 + T);
+      }
+    }
+  }
+}
+
+// entrance faces spawn; gaps alternate to force the spiral walk
+addMazeRing(8, 'N');
+addMazeRing(5.8, 'S');
+addMazeRing(3.6, 'N');
+
+const pedestal = new THREE.Mesh(
+  new THREE.CylinderGeometry(1.0, 1.1, 1.0, 20),
+  towerMaterial
+);
+pedestal.position.set(MAZE.x, 0.5, MAZE.z);
+scene.add(pedestal);
+COLLIDERS.push({ x: MAZE.x, z: MAZE.z, hw: 0.9, hd: 0.9 });
+CLICKABLES.push({
+  object: pedestal,
+  text: [
+    'THE MINIATURE',
+    '',
+    'A very small world, faithfully kept.',
+    '',
+    'Somewhere in it stands an even',
+    'smaller pedestal, and on it, a',
+    'smaller world still.',
+    '',
+    'You are the gray speck.',
+    'Do try to wave.',
+  ].join('\n'),
+});
+
+const MINI_SCALE = 0.022;
+const diorama = new THREE.Group();
+diorama.position.set(MAZE.x, 1.02, MAZE.z);
+{
+  const plate = new THREE.Mesh(
+    new THREE.BoxGeometry(2.7, 0.05, 2.7),
+    towerMaterial
+  );
+  plate.position.y = 0.025;
+  diorama.add(plate);
+
+  // the tower, leaning as it does
+  const miniTowerPivot = new THREE.Group();
+  miniTowerPivot.position.set(TOWER.x * MINI_SCALE, 0.05, TOWER.z * MINI_SCALE);
+  miniTowerPivot.rotation.z = TOWER.lean;
+  const miniTower = new THREE.Mesh(
+    new THREE.BoxGeometry(0.18, TOWER.height * MINI_SCALE, 0.18),
+    towerMaterial
+  );
+  miniTower.position.y = (TOWER.height * MINI_SCALE) / 2;
+  miniTowerPivot.add(miniTower);
+  diorama.add(miniTowerPivot);
+
+  // the caged moon on a hair-thin pole
+  const pole = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.008, 0.008, 26 * MINI_SCALE, 6),
+    towerMaterial
+  );
+  pole.position.set(-40 * MINI_SCALE, 0.05 + (26 * MINI_SCALE) / 2, -40 * MINI_SCALE);
+  diorama.add(pole);
+  const miniMoon = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(0.08, 1),
+    moonMaterial
+  );
+  miniMoon.position.set(-40 * MINI_SCALE, 0.05 + 26 * MINI_SCALE, -40 * MINI_SCALE);
+  diorama.add(miniMoon);
+
+  // staircase as a small cone, graveyard as a low slab, the lone door
+  const miniStairs = new THREE.Mesh(
+    new THREE.CylinderGeometry(0, 0.12, 0.5, 8),
+    towerMaterial
+  );
+  miniStairs.position.set(40 * MINI_SCALE, 0.3, 12 * MINI_SCALE);
+  diorama.add(miniStairs);
+  const miniGrave = new THREE.Mesh(
+    new THREE.BoxGeometry(0.2, 0.05, 0.16),
+    towerMaterial
+  );
+  miniGrave.position.set(26 * MINI_SCALE, 0.08, -13 * MINI_SCALE);
+  diorama.add(miniGrave);
+  const miniDoor = new THREE.Mesh(
+    new THREE.BoxGeometry(0.08, 0.11, 0.02),
+    towerMaterial
+  );
+  miniDoor.position.set(-30 * MINI_SCALE, 0.1, 20 * MINI_SCALE);
+  diorama.add(miniDoor);
+  const miniPool = new THREE.Mesh(
+    new THREE.CylinderGeometry(5.5 * MINI_SCALE, 5.5 * MINI_SCALE, 0.01, 20),
+    slitMaterial
+  );
+  miniPool.position.set(0, 0.055, 0);
+  diorama.add(miniPool);
+}
+const miniYou = new THREE.Mesh(
+  new THREE.BoxGeometry(0.06, 0.09, 0.06),
+  slitMaterial
+);
+diorama.add(miniYou);
+scene.add(diorama);
 
 // --- the lone door ---
 // A freestanding doorframe in the middle of nowhere. Walking through it
@@ -978,8 +1277,12 @@ renderer.setAnimationLoop(() => {
     verticalVelocity = settings.jumpVelocity;
     grounded = false;
   }
+  // inside the crater ring, gravity loosens its grip
+  const lowGravity =
+    Math.hypot(camera.position.x - CRATER.x, camera.position.z - CRATER.z) <
+    CRATER.radius;
   if (!grounded) {
-    verticalVelocity -= settings.gravity * delta;
+    verticalVelocity -= settings.gravity * (lowGravity ? 0.25 : 1) * delta;
     feetY += verticalVelocity * delta;
     if (feetY <= 0) {
       feetY = 0;
@@ -1068,6 +1371,26 @@ renderer.setAnimationLoop(() => {
     bellPivot.rotation.z = Math.sin(bellPhase) * bellAmp;
   }
 
+  // struck chime tubes swing the same way
+  for (const c of chimeTubes) {
+    if (c.amp > 0.001) {
+      c.phase += 9 * delta;
+      c.amp *= Math.exp(-1.6 * delta);
+      c.pivot.rotation.x = Math.sin(c.phase) * c.amp;
+    }
+  }
+
+  // crater shards orbit and bob
+  craterSpin.rotation.y = t * 0.12;
+  craterSpin.children.forEach((shard, i) => {
+    shard.position.y = 2.6 + Math.sin(t * 0.7 + i * 1.3) * 0.8;
+    shard.rotation.x = t * 0.3 + i;
+  });
+
+  // the miniature keeps track of you
+  miniYou.position.set(pos.x * MINI_SCALE, 0.1, pos.z * MINI_SCALE);
+  miniYou.scale.setScalar(1 + Math.sin(t * 5) * 0.25);
+
   // motes drift upward and wrap
   {
     const arr = motesGeometry.attributes.position.array;
@@ -1147,5 +1470,6 @@ if (window.location.hash === '#debug') {
     world
       .add({ invert: () => setInverted(!inverted) }, 'invert')
       .name('invert world');
+    world.add(pool, 'visible').name('mirror pool');
   });
 }
