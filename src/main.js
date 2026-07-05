@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Reflector } from 'three/addons/objects/Reflector.js';
+import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 
 // ---------- world constants ----------
 
@@ -22,6 +23,7 @@ const settings = {
   // look
   sensitivity: 0.0022,
   invertY: false,
+  mirrorPool: true, // the true mirror; a cheap disc stands in when off/far
   fov: 75,
   sprintFovKick: 8, // extra FOV while sprinting, for a sense of speed
   headBob: true,
@@ -245,6 +247,9 @@ function stoneTexture(entries) {
   return texture;
 }
 
+// rounded stone caps accumulate here and merge into one mesh at the end
+const stoneCapGeometries = [];
+
 // upright slab with a rounded cap and engraved front face
 function addStone({ x, z, rotY, width, height, depth, entries }) {
   const group = new THREE.Group();
@@ -260,21 +265,15 @@ function addStone({ x, z, rotY, width, height, depth, entries }) {
   body.position.y = height / 2;
   group.add(body);
 
-  const capGeometry = new THREE.CylinderGeometry(
-    width / 2,
-    width / 2,
-    depth,
-    14,
-    1,
-    false,
-    0,
-    Math.PI
+  // the cap sits on the group's rotation axis, so its world transform can
+  // be baked directly into the geometry for the merged-caps mesh
+  stoneCapGeometries.push(
+    new THREE.CylinderGeometry(width / 2, width / 2, depth, 14, 1, false, 0, Math.PI)
+      .rotateX(-Math.PI / 2) // extrude along depth
+      .rotateZ(Math.PI / 2) // bulge upward
+      .rotateY(rotY)
+      .translate(x, height, z)
   );
-  capGeometry.rotateX(-Math.PI / 2); // extrude along depth
-  capGeometry.rotateZ(Math.PI / 2); // bulge upward
-  const cap = new THREE.Mesh(capGeometry, towerMaterial);
-  cap.position.y = height;
-  group.add(cap);
 
   group.position.set(x, 0, z);
   group.rotation.y = rotY;
@@ -355,6 +354,9 @@ const monument = addStone({
 });
 CLICKABLES.push({ object: monument, text: EPITAPH_TEXT });
 
+// all stone caps in a single draw call
+scene.add(new THREE.Mesh(mergeGeometries(stoneCapGeometries), towerMaterial));
+
 // the ghost of Croc.tsx, swimming laps over its own grave
 const ghostMaterial = new THREE.MeshStandardMaterial({
   color: 0xffffff,
@@ -366,11 +368,10 @@ const ghostMaterial = new THREE.MeshStandardMaterial({
 
 const ghostCroc = new THREE.Group();
 {
-  const part = (w, h, d, x, y, z) => {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), ghostMaterial);
-    mesh.position.set(x, y, z);
-    ghostCroc.add(mesh);
-  };
+  // all parts move as one rigid body — merge them into a single draw call
+  const parts = [];
+  const part = (w, h, d, x, y, z) =>
+    parts.push(new THREE.BoxGeometry(w, h, d).translate(x, y, z));
   part(3.0, 0.7, 1.2, 0, 0, 0); // body
   part(1.0, 0.55, 0.9, 1.9, -0.05, 0); // head
   part(1.2, 0.28, 0.7, 2.9, -0.18, 0); // snout
@@ -382,6 +383,7 @@ const ghostCroc = new THREE.Group();
   part(0.4, 0.7, 0.4, 1.0, -0.55, -0.75);
   part(0.4, 0.7, 0.4, -1.0, -0.55, 0.75);
   part(0.4, 0.7, 0.4, -1.0, -0.55, -0.75);
+  ghostCroc.add(new THREE.Mesh(mergeGeometries(parts), ghostMaterial));
 }
 scene.add(ghostCroc);
 
@@ -391,19 +393,21 @@ scene.add(ghostCroc);
 const stairMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
 
 const STAIRCASE = { x: 40, z: 12, radius: 5.5, count: 24 };
-for (let i = 0; i < STAIRCASE.count; i++) {
-  const angle = i * 0.5;
-  const step = new THREE.Mesh(
-    new THREE.BoxGeometry(2.4, 0.25, 1.3),
-    stairMaterial
-  );
-  step.position.set(
-    STAIRCASE.x + Math.cos(angle) * STAIRCASE.radius,
-    2.6 + i * 0.85,
-    STAIRCASE.z + Math.sin(angle) * STAIRCASE.radius
-  );
-  step.rotation.y = -angle + Math.PI / 2;
-  scene.add(step);
+{
+  const steps = [];
+  for (let i = 0; i < STAIRCASE.count; i++) {
+    const angle = i * 0.5;
+    steps.push(
+      new THREE.BoxGeometry(2.4, 0.25, 1.3)
+        .rotateY(-angle + Math.PI / 2)
+        .translate(
+          STAIRCASE.x + Math.cos(angle) * STAIRCASE.radius,
+          2.6 + i * 0.85,
+          STAIRCASE.z + Math.sin(angle) * STAIRCASE.radius
+        )
+    );
+  }
+  scene.add(new THREE.Mesh(mergeGeometries(steps), stairMaterial));
 }
 
 // --- a caged moon in the far corner ---
@@ -426,16 +430,17 @@ function makeRing(count, radius, tiltX, tiltZ) {
   const tilt = new THREE.Group();
   tilt.rotation.set(tiltX, 0, tiltZ);
   const spin = new THREE.Group();
+  // the cubes orbit as a rigid ring — one merged mesh per ring
+  const cubes = [];
   for (let i = 0; i < count; i++) {
     const angle = (i / count) * Math.PI * 2;
-    const cube = new THREE.Mesh(
-      new THREE.BoxGeometry(0.5, 0.5, 0.5),
-      towerMaterial
+    cubes.push(
+      new THREE.BoxGeometry(0.5, 0.5, 0.5)
+        .rotateY(angle)
+        .translate(Math.cos(angle) * radius, 0, Math.sin(angle) * radius)
     );
-    cube.position.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
-    cube.rotation.y = angle;
-    spin.add(cube);
   }
+  spin.add(new THREE.Mesh(mergeGeometries(cubes), towerMaterial));
   tilt.add(spin);
   moon.add(tilt);
   return spin;
@@ -452,29 +457,28 @@ scene.add(moon);
 const WATCHERS = { x: -40, z: -40, radius: 8, count: 7 };
 const watcherPivots = [];
 const slitMaterial = new THREE.MeshBasicMaterial({ color: 0x555555 });
+
+// one shared shaft+tip geometry for all watchers
+const watcherBodyGeometry = mergeGeometries([
+  new THREE.BoxGeometry(0.7, 3.8, 0.7).translate(0, 1.9, 0),
+  new THREE.CylinderGeometry(0, 0.62, 1.1, 4)
+    .rotateY(Math.PI / 4) // align pyramid faces with the shaft
+    .translate(0, 4.35, 0),
+]);
+
 for (let i = 0; i < WATCHERS.count; i++) {
   const angle = (i / WATCHERS.count) * Math.PI * 2;
   const x = WATCHERS.x + Math.cos(angle) * WATCHERS.radius;
   const z = WATCHERS.z + Math.sin(angle) * WATCHERS.radius;
 
   const pivot = new THREE.Group();
-  const shaft = new THREE.Mesh(
-    new THREE.BoxGeometry(0.7, 3.8, 0.7),
-    towerMaterial
-  );
-  shaft.position.y = 1.9;
-  const tip = new THREE.Mesh(
-    new THREE.CylinderGeometry(0, 0.62, 1.1, 4),
-    towerMaterial
-  );
-  tip.position.y = 4.35;
-  tip.rotation.y = Math.PI / 4; // align pyramid faces with the shaft
+  const body = new THREE.Mesh(watcherBodyGeometry, towerMaterial);
   const eye = new THREE.Mesh(
     new THREE.BoxGeometry(0.16, 0.55, 0.06),
     slitMaterial
   );
   eye.position.set(0, 3.2, 0.38); // narrow slit on the front face
-  pivot.add(shaft, tip, eye);
+  pivot.add(body, eye);
   pivot.position.set(x, 0, z);
   pivot.rotation.y = angle + Math.PI / 2; // start facing along the ring
   scene.add(pivot);
@@ -543,19 +547,21 @@ const GLYPHS = {
   scene.add(constellation);
 
   // the marked spot: stand here, look west, see the word
-  const plate = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.75, 0.75, 0.06, 24),
-    towerMaterial
+  scene.add(
+    new THREE.Mesh(
+      mergeGeometries([
+        new THREE.CylinderGeometry(0.75, 0.75, 0.06, 24).translate(
+          VIEWPOINT.x,
+          0.03,
+          VIEWPOINT.z
+        ),
+        new THREE.TorusGeometry(1.05, 0.03, 8, 32)
+          .rotateX(-Math.PI / 2)
+          .translate(VIEWPOINT.x, 0.06, VIEWPOINT.z),
+      ]),
+      towerMaterial
+    )
   );
-  plate.position.set(VIEWPOINT.x, 0.03, VIEWPOINT.z);
-  scene.add(plate);
-  const plateRing = new THREE.Mesh(
-    new THREE.TorusGeometry(1.05, 0.03, 8, 32),
-    towerMaterial
-  );
-  plateRing.rotation.x = -Math.PI / 2;
-  plateRing.position.set(VIEWPOINT.x, 0.06, VIEWPOINT.z);
-  scene.add(plateRing);
 }
 
 // --- the bell ---
@@ -569,19 +575,18 @@ const bellMaterial = new THREE.MeshStandardMaterial({
 });
 
 {
-  const postGeometry = new THREE.BoxGeometry(0.35, 3.4, 0.35);
+  const frame = [new THREE.BoxGeometry(3.0, 0.35, 0.35).translate(BELL.x, 3.58, BELL.z)];
   for (const side of [-1, 1]) {
-    const post = new THREE.Mesh(postGeometry, towerMaterial);
-    post.position.set(BELL.x + side * 1.3, 1.7, BELL.z);
-    scene.add(post);
+    frame.push(
+      new THREE.BoxGeometry(0.35, 3.4, 0.35).translate(
+        BELL.x + side * 1.3,
+        1.7,
+        BELL.z
+      )
+    );
     COLLIDERS.push({ x: BELL.x + side * 1.3, z: BELL.z, hw: 0.175, hd: 0.175 });
   }
-  const crossbar = new THREE.Mesh(
-    new THREE.BoxGeometry(3.0, 0.35, 0.35),
-    towerMaterial
-  );
-  crossbar.position.set(BELL.x, 3.58, BELL.z);
-  scene.add(crossbar);
+  scene.add(new THREE.Mesh(mergeGeometries(frame), towerMaterial));
 }
 
 const bellPivot = new THREE.Group();
@@ -718,13 +723,25 @@ scene.add(motes);
 
 const pool = new Reflector(new THREE.CircleGeometry(5.5, 48), {
   clipBias: 0.003,
-  textureWidth: 1024,
-  textureHeight: 1024,
+  textureWidth: 512,
+  textureHeight: 512,
   color: 0x777777,
 });
 pool.rotation.x = -Math.PI / 2;
 pool.position.set(0, 0.02, 0);
 scene.add(pool);
+
+// the true mirror re-renders the whole scene, so it only runs up close;
+// this dark-glass disc sits beneath it and takes over at a distance
+const poolFallbackMaterial = new THREE.MeshBasicMaterial({ color: 0x131313 });
+const poolFallback = new THREE.Mesh(
+  new THREE.CircleGeometry(5.5, 48),
+  poolFallbackMaterial
+);
+poolFallback.rotation.x = -Math.PI / 2;
+poolFallback.position.set(0, 0.005, 0);
+scene.add(poolFallback);
+const POOL_MIRROR_DISTANCE = 35;
 
 const poolRim = new THREE.Mesh(
   new THREE.TorusGeometry(5.7, 0.09, 10, 64),
@@ -753,18 +770,17 @@ let oracleIndex = Math.floor(Math.random() * ORACLE.length);
 
 {
   const lectern = new THREE.Group();
-  const post = new THREE.Mesh(
-    new THREE.BoxGeometry(0.25, 1.15, 0.25),
-    towerMaterial
+  lectern.add(
+    new THREE.Mesh(
+      mergeGeometries([
+        new THREE.BoxGeometry(0.25, 1.15, 0.25).translate(0, 0.58, 0),
+        new THREE.BoxGeometry(0.95, 0.08, 0.7)
+          .rotateX(-0.38) // reading slant
+          .translate(0, 1.22, 0),
+      ]),
+      towerMaterial
+    )
   );
-  post.position.y = 0.58;
-  const top = new THREE.Mesh(
-    new THREE.BoxGeometry(0.95, 0.08, 0.7),
-    towerMaterial
-  );
-  top.position.y = 1.22;
-  top.rotation.x = -0.38; // reading slant
-  lectern.add(post, top);
   lectern.position.set(6.2, 0, 3.2);
   lectern.rotation.y = Math.PI / 3; // angled toward the pool
   scene.add(lectern);
@@ -786,11 +802,17 @@ const CHIME_NOTES = [392.0, 440.0, 523.25, 587.33, 659.25]; // G A C D E
 const chimeTubes = [];
 
 {
-  const postGeometry = new THREE.BoxGeometry(0.3, 3.3, 0.3);
+  const frame = [
+    new THREE.BoxGeometry(3.7, 0.22, 0.22).translate(CHIMES.x, 3.35, CHIMES.z),
+  ];
   for (const side of [-1, 1]) {
-    const post = new THREE.Mesh(postGeometry, towerMaterial);
-    post.position.set(CHIMES.x + side * 1.7, 1.65, CHIMES.z);
-    scene.add(post);
+    frame.push(
+      new THREE.BoxGeometry(0.3, 3.3, 0.3).translate(
+        CHIMES.x + side * 1.7,
+        1.65,
+        CHIMES.z
+      )
+    );
     COLLIDERS.push({
       x: CHIMES.x + side * 1.7,
       z: CHIMES.z,
@@ -798,12 +820,7 @@ const chimeTubes = [];
       hd: 0.15,
     });
   }
-  const bar = new THREE.Mesh(
-    new THREE.BoxGeometry(3.7, 0.22, 0.22),
-    towerMaterial
-  );
-  bar.position.set(CHIMES.x, 3.35, CHIMES.z);
-  scene.add(bar);
+  scene.add(new THREE.Mesh(mergeGeometries(frame), towerMaterial));
 
   CHIME_NOTES.forEach((freq, i) => {
     const length = 2.1 - i * 0.2; // shorter tube, higher note
@@ -866,13 +883,12 @@ scene.add(craterSpin);
 
 const MAZE = { x: -32, z: 40 };
 
+const mazeWallGeometries = [];
+
 function wallBox(cx, cz, sx, sz) {
-  const wall = new THREE.Mesh(
-    new THREE.BoxGeometry(sx, 2.4, sz),
-    towerMaterial
+  mazeWallGeometries.push(
+    new THREE.BoxGeometry(sx, 2.4, sz).translate(cx, 1.2, cz)
   );
-  wall.position.set(cx, 1.2, cz);
-  scene.add(wall);
   COLLIDERS.push({ x: cx, z: cz, hw: sx / 2, hd: sz / 2 });
 }
 
@@ -911,6 +927,7 @@ function addMazeRing(half, gapSide) {
 addMazeRing(8, 'N');
 addMazeRing(5.8, 'S');
 addMazeRing(3.6, 'N');
+scene.add(new THREE.Mesh(mergeGeometries(mazeWallGeometries), towerMaterial));
 
 const pedestal = new THREE.Mesh(
   new THREE.CylinderGeometry(1.0, 1.1, 1.0, 20),
@@ -939,60 +956,40 @@ const MINI_SCALE = 0.022;
 const diorama = new THREE.Group();
 diorama.position.set(MAZE.x, 1.02, MAZE.z);
 {
-  const plate = new THREE.Mesh(
-    new THREE.BoxGeometry(2.7, 0.05, 2.7),
-    towerMaterial
+  // all static white parts of the miniature merge into one mesh: the
+  // plate, the leaning tower (lean baked in), the moon's pole, the
+  // staircase cone, the graveyard slab, and the lone door
+  const S = MINI_SCALE;
+  diorama.add(
+    new THREE.Mesh(
+      mergeGeometries([
+        new THREE.BoxGeometry(2.7, 0.05, 2.7).translate(0, 0.025, 0),
+        new THREE.BoxGeometry(0.18, TOWER.height * S, 0.18)
+          .translate(0, (TOWER.height * S) / 2, 0)
+          .rotateZ(TOWER.lean)
+          .translate(TOWER.x * S, 0.05, TOWER.z * S),
+        new THREE.CylinderGeometry(0.008, 0.008, 26 * S, 6).translate(
+          -40 * S,
+          0.05 + (26 * S) / 2,
+          -40 * S
+        ),
+        new THREE.CylinderGeometry(0, 0.12, 0.5, 8).translate(40 * S, 0.3, 12 * S),
+        new THREE.BoxGeometry(0.2, 0.05, 0.16).translate(26 * S, 0.08, -13 * S),
+        new THREE.BoxGeometry(0.08, 0.11, 0.02).translate(-30 * S, 0.1, 20 * S),
+      ]),
+      towerMaterial
+    )
   );
-  plate.position.y = 0.025;
-  diorama.add(plate);
 
-  // the tower, leaning as it does
-  const miniTowerPivot = new THREE.Group();
-  miniTowerPivot.position.set(TOWER.x * MINI_SCALE, 0.05, TOWER.z * MINI_SCALE);
-  miniTowerPivot.rotation.z = TOWER.lean;
-  const miniTower = new THREE.Mesh(
-    new THREE.BoxGeometry(0.18, TOWER.height * MINI_SCALE, 0.18),
-    towerMaterial
-  );
-  miniTower.position.y = (TOWER.height * MINI_SCALE) / 2;
-  miniTowerPivot.add(miniTower);
-  diorama.add(miniTowerPivot);
-
-  // the caged moon on a hair-thin pole
-  const pole = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.008, 0.008, 26 * MINI_SCALE, 6),
-    towerMaterial
-  );
-  pole.position.set(-40 * MINI_SCALE, 0.05 + (26 * MINI_SCALE) / 2, -40 * MINI_SCALE);
-  diorama.add(pole);
   const miniMoon = new THREE.Mesh(
     new THREE.IcosahedronGeometry(0.08, 1),
     moonMaterial
   );
-  miniMoon.position.set(-40 * MINI_SCALE, 0.05 + 26 * MINI_SCALE, -40 * MINI_SCALE);
+  miniMoon.position.set(-40 * S, 0.05 + 26 * S, -40 * S);
   diorama.add(miniMoon);
 
-  // staircase as a small cone, graveyard as a low slab, the lone door
-  const miniStairs = new THREE.Mesh(
-    new THREE.CylinderGeometry(0, 0.12, 0.5, 8),
-    towerMaterial
-  );
-  miniStairs.position.set(40 * MINI_SCALE, 0.3, 12 * MINI_SCALE);
-  diorama.add(miniStairs);
-  const miniGrave = new THREE.Mesh(
-    new THREE.BoxGeometry(0.2, 0.05, 0.16),
-    towerMaterial
-  );
-  miniGrave.position.set(26 * MINI_SCALE, 0.08, -13 * MINI_SCALE);
-  diorama.add(miniGrave);
-  const miniDoor = new THREE.Mesh(
-    new THREE.BoxGeometry(0.08, 0.11, 0.02),
-    towerMaterial
-  );
-  miniDoor.position.set(-30 * MINI_SCALE, 0.1, 20 * MINI_SCALE);
-  diorama.add(miniDoor);
   const miniPool = new THREE.Mesh(
-    new THREE.CylinderGeometry(5.5 * MINI_SCALE, 5.5 * MINI_SCALE, 0.01, 20),
+    new THREE.CylinderGeometry(5.5 * S, 5.5 * S, 0.01, 20),
     slitMaterial
   );
   miniPool.position.set(0, 0.055, 0);
@@ -1011,11 +1008,17 @@ scene.add(diorama);
 
 const DOOR = { x: -30, z: 20, halfAperture: 1.0 };
 {
-  const pillarGeometry = new THREE.BoxGeometry(0.45, 4.4, 0.45);
+  const frame = [
+    new THREE.BoxGeometry(3.0, 0.45, 0.45).translate(DOOR.x, 4.62, DOOR.z),
+  ];
   for (const side of [-1, 1]) {
-    const pillar = new THREE.Mesh(pillarGeometry, towerMaterial);
-    pillar.position.set(DOOR.x + side * 1.25, 2.2, DOOR.z);
-    scene.add(pillar);
+    frame.push(
+      new THREE.BoxGeometry(0.45, 4.4, 0.45).translate(
+        DOOR.x + side * 1.25,
+        2.2,
+        DOOR.z
+      )
+    );
     COLLIDERS.push({
       x: DOOR.x + side * 1.25,
       z: DOOR.z,
@@ -1023,12 +1026,7 @@ const DOOR = { x: -30, z: 20, halfAperture: 1.0 };
       hd: 0.225,
     });
   }
-  const lintel = new THREE.Mesh(
-    new THREE.BoxGeometry(3.0, 0.45, 0.45),
-    towerMaterial
-  );
-  lintel.position.set(DOOR.x, 4.62, DOOR.z);
-  scene.add(lintel);
+  scene.add(new THREE.Mesh(mergeGeometries(frame), towerMaterial));
 }
 
 let inverted = false;
@@ -1050,6 +1048,7 @@ function setInverted(on) {
   scene.fog.color.set(bg);
   const fg = on ? 0x141414 : 0xffffff;
   for (const m of INVERT_MATERIALS) m.color.set(fg);
+  poolFallbackMaterial.color.set(on ? 0xdedad0 : 0x131313);
 }
 
 const keyLight = new THREE.DirectionalLight(0xffffff, 2.5);
@@ -1352,6 +1351,10 @@ renderer.setAnimationLoop(() => {
   moonCore.rotation.y = t * 0.05;
   padMesh.scale.setScalar(1 + Math.sin(t * 2.5) * 0.03);
 
+  // true mirror only while close enough to appreciate it
+  pool.visible =
+    settings.mirrorPool && Math.hypot(pos.x, pos.z) < POOL_MIRROR_DISTANCE;
+
   // the watchers turn toward the player, but only while unobserved
   camera.getWorldDirection(scratchDir);
   for (const w of watcherPivots) {
@@ -1431,6 +1434,8 @@ if (window.location.hash === '#debug') {
       inverted,
       bellAmp,
       watcherYaws: watcherPivots.map((w) => +w.rotation.y.toFixed(3)),
+      drawCalls: renderer.info.render.calls,
+      frame: renderer.info.render.frame,
     }),
   };
 
@@ -1470,6 +1475,6 @@ if (window.location.hash === '#debug') {
     world
       .add({ invert: () => setInverted(!inverted) }, 'invert')
       .name('invert world');
-    world.add(pool, 'visible').name('mirror pool');
+    world.add(settings, 'mirrorPool').name('mirror pool');
   });
 }
