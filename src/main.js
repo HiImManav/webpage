@@ -299,22 +299,27 @@ const DELETED_FILES = [
   'speech-bubble.png',
 ];
 
+const stoneGroups = []; // kept so each grave can speak when clicked
+
 DELETED_FILES.forEach((name, i) => {
   const dot = name.lastIndexOf('.');
   const row = Math.floor(i / 4);
   const col = i % 4;
-  addStone({
-    x: GRAVEYARD.x + (col - 1.5) * 2.8 + jitter(i) * 0.5,
-    z: GRAVEYARD.z + row * 3.4 + jitter(i + 31) * 0.5,
-    rotY: jitter(i + 62) * 0.22,
-    width: 1.1,
-    height: 1.15,
-    depth: 0.24,
-    entries: [
-      ['R.I.P.', '30px Georgia', 76],
-      [name.slice(0, dot), 'bold 21px monospace', 140],
-      [name.slice(dot), 'bold 21px monospace', 172],
-    ],
+  stoneGroups.push({
+    name,
+    group: addStone({
+      x: GRAVEYARD.x + (col - 1.5) * 2.8 + jitter(i) * 0.5,
+      z: GRAVEYARD.z + row * 3.4 + jitter(i + 31) * 0.5,
+      rotY: jitter(i + 62) * 0.22,
+      width: 1.1,
+      height: 1.15,
+      depth: 0.24,
+      entries: [
+        ['R.I.P.', '30px Georgia', 76],
+        [name.slice(0, dot), 'bold 21px monospace', 140],
+        [name.slice(dot), 'bold 21px monospace', 172],
+      ],
+    }),
   });
 });
 
@@ -457,6 +462,8 @@ scene.add(moon);
 const WATCHERS = { x: -40, z: -40, radius: 8, count: 7 };
 const watcherPivots = [];
 const slitMaterial = new THREE.MeshBasicMaterial({ color: 0x555555 });
+// the eyes get their own material — they have somewhere to go, colorwise
+const eyeMaterial = new THREE.MeshBasicMaterial({ color: 0x555555 });
 
 // one shared shaft+tip geometry for all watchers
 const watcherBodyGeometry = mergeGeometries([
@@ -475,7 +482,7 @@ for (let i = 0; i < WATCHERS.count; i++) {
   const body = new THREE.Mesh(watcherBodyGeometry, towerMaterial);
   const eye = new THREE.Mesh(
     new THREE.BoxGeometry(0.16, 0.55, 0.06),
-    slitMaterial
+    eyeMaterial
   );
   eye.position.set(0, 3.2, 0.38); // narrow slit on the front face
   pivot.add(body, eye);
@@ -939,6 +946,8 @@ scene.add(new THREE.Mesh(mergeGeometries(mazeWallGeometries), towerMaterial));
 // three ribbons of light waving high behind the leaning tower
 
 const auroraTime = { value: 0 };
+const auroraBurst = { value: 0 }; // spikes when someone touches the sky
+const auroraRibbons = [];
 
 function addAuroraRibbon(y, z, phase, colorA, colorB) {
   const material = new THREE.ShaderMaterial({
@@ -947,24 +956,28 @@ function addAuroraRibbon(y, z, phase, colorA, colorB) {
     side: THREE.DoubleSide,
     uniforms: {
       uTime: auroraTime, // shared — one update animates all ribbons
+      uBurst: auroraBurst,
       uPhase: { value: phase },
       uColorA: { value: new THREE.Color(colorA) },
       uColorB: { value: new THREE.Color(colorB) },
     },
     vertexShader: `
       uniform float uTime;
+      uniform float uBurst;
       uniform float uPhase;
       varying vec2 vUv;
       void main() {
         vUv = uv;
+        float amp = 1.0 + uBurst * 0.7;
         vec3 p = position;
-        p.y += sin(p.x * 0.12 + uTime * 0.6 + uPhase) * 1.8
-             + sin(p.x * 0.045 - uTime * 0.25 + uPhase * 2.0) * 2.6;
-        p.z += sin(p.x * 0.08 + uTime * 0.4 + uPhase) * 1.5;
+        p.y += (sin(p.x * 0.12 + uTime * 0.6 + uPhase) * 1.8
+             + sin(p.x * 0.045 - uTime * 0.25 + uPhase * 2.0) * 2.6) * amp;
+        p.z += sin(p.x * 0.08 + uTime * 0.4 + uPhase) * 1.5 * amp;
         gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0);
       }`,
     fragmentShader: `
       uniform float uTime;
+      uniform float uBurst;
       uniform float uPhase;
       uniform vec3 uColorA;
       uniform vec3 uColorB;
@@ -973,13 +986,14 @@ function addAuroraRibbon(y, z, phase, colorA, colorB) {
         vec3 color = mix(uColorA, uColorB, vUv.x);
         float edge = sin(vUv.y * 3.14159);
         float shimmer = 0.65 + 0.35 * sin(vUv.x * 18.0 + uTime * 1.4 + uPhase);
-        gl_FragColor = vec4(color, edge * shimmer * 0.45);
+        gl_FragColor = vec4(color, edge * shimmer * 0.45 * (1.0 + uBurst * 0.9));
       }`,
   });
   const ribbon = new THREE.Mesh(new THREE.PlaneGeometry(90, 5, 96, 6), material);
   ribbon.position.set(0, y, z);
   ribbon.frustumCulled = false; // the shader waves verts outside the base bounds
   scene.add(ribbon);
+  auroraRibbons.push(ribbon);
 }
 
 addAuroraRibbon(29, -52, 0, 0x27e0b8, 0x7a5cff);
@@ -1330,6 +1344,187 @@ function setInverted(on) {
   poolFallbackMaterial.color.set(on ? 0xdedad0 : 0x131313);
 }
 
+// ---------- zany reactions ----------
+// Clicking things does things. Emotional range: yes.
+
+// -- the tower can always lean a little more --
+
+const TOWER_MAX_LEAN = 0.16; // ~9 degrees; Pisa manages four
+
+CLICKABLES.push({
+  object: towerGroup,
+  onClick: () => {
+    if (towerGroup.rotation.z < TOWER_MAX_LEAN) {
+      towerGroup.rotation.z += 0.006;
+      playPartials([
+        [55, 0.16, 1.6],
+        [41, 0.12, 2.0, 0.06], // structural groan
+      ]);
+      if (towerGroup.rotation.z >= TOWER_MAX_LEAN) {
+        openParchment(
+          'The tower stops, mid-groan.\n\nNine degrees. Pisa manages four.\n\nIt refuses to lean any further. It has\nstandards, and a growing sense that\nyou are not helping.'
+        );
+      }
+    } else {
+      playPartials([[220, 0.05, 0.15]]); // a small indignant knock
+      openParchment('The tower refuses.\n\nYou have done enough.');
+    }
+  },
+});
+
+// -- the watchers do not appreciate being poked --
+
+const EYE_GRAY = new THREE.Color(0x555555);
+const EYE_RED = new THREE.Color(0xd93636);
+let stareUntil = -1;
+let fogFarBase = 65;
+
+function startStare() {
+  if (clock.elapsedTime < stareUntil) return;
+  fogFarBase = scene.fog.far;
+  stareUntil = clock.elapsedTime + 3.2;
+  playPartials([
+    [55, 0.18, 3.0],
+    [58, 0.14, 3.0], // beat frequency: a slow, unhappy pulse
+  ]);
+}
+
+for (const w of watcherPivots) {
+  CLICKABLES.push({ object: w, onClick: startStare });
+}
+
+// -- the ghost croc is ticklish --
+
+const CROC_THOUGHTS = [
+  'blub.',
+  'The ghost croc regards you with one\ntranslucent eye.\n\nIt remembers fruit.',
+  'You pass your hand through the croc.\nThe croc passes its teeth through you.\n\nNeither of you feels a thing.\nBoth of you pretend to.',
+];
+let crocRollT = 1; // 1 = not rolling
+let crocGulp = 0;
+let crocThoughtIndex = 0;
+
+CLICKABLES.push({
+  object: ghostCroc,
+  onClick: () => {
+    crocRollT = 0; // barrel roll
+    playPartials([
+      [180, 0.1, 0.08],
+      [140, 0.12, 0.1, 0.09], // a polite ghost-nibble
+    ]);
+    if (Math.random() < 0.34) {
+      openParchment(CROC_THOUGHTS[crocThoughtIndex++ % CROC_THOUGHTS.length]);
+    }
+  },
+});
+
+// -- the buried files still talk in their sleep --
+// visit all eight graves and something long-overdue happens
+
+const FILE_MEMORIES = {
+  'Croc.tsx':
+    'I chased. I chomped.\n\nI never caught the last one.\nDo you know where it went?',
+  'BouncingFruits.tsx': 'I contained multitudes.\n\nMostly fruit.',
+  'apple.png': 'I was bitten once, long before this.\n\nIt never healed.',
+  'banana.png':
+    'I was the only one of them who\ncould split.\n\nNobody laughed harder than the croc.',
+  'blueberry.png': 'I was very small and very round,\nand I mattered.',
+  'lemon.png': 'Life gave me.',
+  'orange.png': 'I rhymed with nothing.\n\nI bounced alone.',
+  'speech-bubble.png': '…',
+};
+
+const visitedStones = new Set();
+let fruitGiven = false;
+let fruitFalling = false;
+
+const fruit = new THREE.Mesh(
+  new THREE.SphereGeometry(0.28, 12, 12),
+  new THREE.MeshBasicMaterial({ color: 0xff4a4a, fog: false })
+);
+fruit.visible = false;
+scene.add(fruit);
+
+for (const { name, group } of stoneGroups) {
+  CLICKABLES.push({
+    object: group,
+    onClick: () => {
+      openParchment(`R.I.P. ${name}\n\n${FILE_MEMORIES[name]}`);
+      visitedStones.add(name);
+      if (visitedStones.size === DELETED_FILES.length && !fruitGiven) {
+        fruitGiven = true;
+        fruitFalling = true;
+        fruit.visible = true;
+        fruit.position.set(GRAVEYARD.x, 40, GRAVEYARD.z);
+      }
+    },
+  });
+}
+
+// -- the moon rattles its cage --
+
+let cageRattle = 0;
+let ringAAngle = 0;
+let ringBAngle = 0;
+
+CLICKABLES.push({
+  object: moon,
+  onClick: () => {
+    cageRattle = 1;
+    playPartials([
+      [98, 0.2, 3.5],
+      [147, 0.08, 2.2, 0.03],
+      [196, 0.05, 1.5, 0.06], // a gong, far away and slightly annoyed
+    ]);
+  },
+});
+
+// -- poking the tiny you --
+
+let miniYouPoked = false;
+{
+  // a forgiving invisible hitbox around the six-centimeter figure
+  const hit = new THREE.Mesh(
+    new THREE.SphereGeometry(0.16, 8, 8),
+    new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false })
+  );
+  miniYou.add(hit);
+}
+
+CLICKABLES.push({
+  object: miniYou,
+  onClick: () => {
+    verticalVelocity = 12;
+    grounded = false;
+    playPartials([
+      [880, 0.06, 0.3],
+      [1174.7, 0.05, 0.3, 0.06],
+    ]);
+    if (!miniYouPoked) {
+      miniYouPoked = true;
+      openParchment(
+        'You poke the tiny you.\n\nSomewhere, something enormous\npokes back.'
+      );
+    }
+  },
+});
+
+// -- the aurora can be touched, apparently --
+
+for (const ribbon of auroraRibbons) {
+  CLICKABLES.push({
+    object: ribbon,
+    onClick: () => {
+      auroraBurst.value = 1;
+      playPartials([
+        [1046.5, 0.03, 2.5],
+        [1318.5, 0.025, 2.5, 0.1],
+        [1568.0, 0.02, 2.5, 0.2], // wind through glass
+      ]);
+    },
+  });
+}
+
 const keyLight = new THREE.DirectionalLight(0xffffff, 2.5);
 keyLight.position.set(30, 50, 40);
 scene.add(keyLight);
@@ -1624,9 +1819,19 @@ renderer.setAnimationLoop(() => {
     GRAVEYARD.z + Math.sin(crocAngle) * 7
   );
   ghostCroc.rotation.y = -crocAngle - Math.PI / 2;
-  ghostCroc.rotation.z = Math.sin(t * 0.8) * 0.06; // lazy swimming roll
-  ringASpin.rotation.y = t * 0.35;
-  ringBSpin.rotation.y = -t * 0.22;
+  let crocRoll = Math.sin(t * 0.8) * 0.06; // lazy swimming roll
+  if (crocRollT < 1) {
+    crocRollT = Math.min(1, crocRollT + delta / 0.9);
+    crocRoll += crocRollT * Math.PI * 2; // one full ticklish barrel roll
+  }
+  ghostCroc.rotation.z = crocRoll;
+  if (crocGulp > 0.01) crocGulp *= Math.exp(-2 * delta);
+  ghostCroc.scale.setScalar(1 + crocGulp * 0.35);
+  if (cageRattle > 0.01) cageRattle *= Math.exp(-1.2 * delta);
+  ringAAngle += (0.35 + cageRattle * 4) * delta;
+  ringBAngle -= (0.22 + cageRattle * 5) * delta;
+  ringASpin.rotation.y = ringAAngle;
+  ringBSpin.rotation.y = ringBAngle;
   moonCore.rotation.y = t * 0.05;
   padMesh.scale.setScalar(1 + Math.sin(t * 2.5) * 0.03);
 
@@ -1634,16 +1839,29 @@ renderer.setAnimationLoop(() => {
   pool.visible =
     settings.mirrorPool && Math.hypot(pos.x, pos.z) < POOL_MIRROR_DISTANCE;
 
-  // the watchers turn toward the player, but only while unobserved
+  // the watchers turn toward the player, but only while unobserved —
+  // unless one was poked, in which case all of them stare. Openly.
+  const staring = t < stareUntil;
   camera.getWorldDirection(scratchDir);
   for (const w of watcherPivots) {
     const dx = w.position.x - pos.x;
     const dz = w.position.z - pos.z;
-    if (scratchDir.x * dx + scratchDir.z * dz > 0) continue; // being watched
     const target = Math.atan2(-dx, -dz); // yaw that faces the player
+    if (staring) {
+      w.rotation.y = target; // instant. all of them. no pretense.
+      continue;
+    }
+    if (scratchDir.x * dx + scratchDir.z * dz > 0) continue; // being watched
     let diff = target - w.rotation.y;
     diff = Math.atan2(Math.sin(diff), Math.cos(diff)); // shortest arc
     w.rotation.y += diff * Math.min(1, 3 * delta);
+  }
+  // eyes flush red and the dark closes in while they stare
+  if (staring || t < stareUntil + 4) {
+    eyeMaterial.color.lerp(staring ? EYE_RED : EYE_GRAY, Math.min(1, 6 * delta));
+    scene.fog.far +=
+      ((staring ? 30 : fogFarBase) - scene.fog.far) *
+      Math.min(1, (staring ? 4 : 1.5) * delta);
   }
 
   // bell swing decays after a ring
@@ -1724,6 +1942,32 @@ renderer.setAnimationLoop(() => {
   musicBoxLid.rotation.x +=
     (lidTarget - musicBoxLid.rotation.x) * Math.min(1, 8 * delta);
 
+  // a touched aurora settles back down
+  if (auroraBurst.value > 0.01) auroraBurst.value *= Math.exp(-1.5 * delta);
+
+  // the last fruit in the universe, falling
+  if (fruitFalling) {
+    fruit.position.y -= 5 * delta;
+    fruit.position.x +=
+      (ghostCroc.position.x - fruit.position.x) * Math.min(1, 3 * delta);
+    fruit.position.z +=
+      (ghostCroc.position.z - fruit.position.z) * Math.min(1, 3 * delta);
+    if (fruit.position.y <= ghostCroc.position.y + 0.3) {
+      fruitFalling = false;
+      fruit.visible = false;
+      crocGulp = 1;
+      crocRollT = 0; // a slow, happy roll
+      playPartials([
+        [120, 0.16, 0.12],
+        [90, 0.18, 0.15, 0.1],
+        [60, 0.12, 0.5, 0.22], // CHOMP
+      ]);
+      openParchment(
+        'The last fruit in the universe falls.\n\nThe croc catches it the way it caught\nevery apple you ever threw, back when\nthis sky was a browser window.\n\nIt does a slow, happy roll.\n\nSomewhere, an old website smiles.'
+      );
+    }
+  }
+
   // motes drift upward and wrap
   {
     const arr = motesGeometry.attributes.position.array;
@@ -1769,6 +2013,14 @@ if (window.location.hash === '#debug') {
       cometVisible: comet.visible,
       lidAngle: +musicBoxLid.rotation.x.toFixed(2),
       t: +clock.elapsedTime.toFixed(1),
+      towerLean: +towerGroup.rotation.z.toFixed(4),
+      staring: clock.elapsedTime < stareUntil,
+      fogFar: +scene.fog.far.toFixed(1),
+      crocRollT: +crocRollT.toFixed(2),
+      cageRattle: +cageRattle.toFixed(2),
+      auroraBurst: +auroraBurst.value.toFixed(2),
+      fruitFalling,
+      stonesVisited: visitedStones.size,
     }),
   };
 
