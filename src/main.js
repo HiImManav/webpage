@@ -1216,6 +1216,99 @@ const comet = new THREE.Group();
 comet.visible = false;
 scene.add(comet);
 
+// --- the ghost dragon ---
+// Something vast lives above the sandbox. It is see-through and it is
+// not in a hurry. Kin to the little croc below — same translucence,
+// same patience — but where the croc circles a grave, the dragon
+// circles everything. Its eyes are gold because it is alive.
+
+const DRAGON = {
+  cx: 0,
+  cz: 0,
+  radius: 46, // the lap passes just above the staircase summit
+  baseY: 28,
+  speed: 0.055,
+  segments: 16,
+  spacing: 0.048, // radians between segments ≈ one body length
+};
+
+function dragonPath(theta, out) {
+  return out.set(
+    DRAGON.cx + Math.cos(theta) * DRAGON.radius,
+    DRAGON.baseY +
+      Math.sin(theta * 3) * 2.6 +
+      Math.sin(theta * 7 + 2) * 1.1,
+    DRAGON.cz + Math.sin(theta) * DRAGON.radius
+  );
+}
+
+const ghostDragon = new THREE.Group();
+const dragonSegments = [];
+let dragonTheta = 0;
+let dragonExcite = 0;
+
+// head faces +Z so Object3D.lookAt() steers it along the path
+const dragonHead = new THREE.Group();
+{
+  const headGeometry = mergeGeometries([
+    new THREE.BoxGeometry(2.6, 1.7, 1.9), // skull
+    new THREE.BoxGeometry(2.0, 0.7, 1.1).translate(1.9, 0.25, 0), // snout
+    new THREE.BoxGeometry(1.6, 0.35, 0.9).translate(1.7, -0.45, 0), // jaw
+    new THREE.BoxGeometry(1.6, 0.28, 0.28).rotateZ(0.5).translate(-1.3, 1.3, -0.55), // horns
+    new THREE.BoxGeometry(1.6, 0.28, 0.28).rotateZ(0.5).translate(-1.3, 1.3, 0.55),
+  ]);
+  headGeometry.rotateY(-Math.PI / 2); // built along +X, flown along +Z
+  dragonHead.add(new THREE.Mesh(headGeometry, ghostMaterial));
+
+  const eyeGeometry = new THREE.BoxGeometry(0.3, 0.3, 0.3);
+  const dragonEyeMaterial = new THREE.MeshBasicMaterial({ color: 0xffd873, fog: false });
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(eyeGeometry, dragonEyeMaterial);
+    eye.position.set(side * 1.0, 0.45, 0.9); // after the rotate: x = width
+    dragonHead.add(eye);
+  }
+  ghostDragon.add(dragonHead);
+}
+
+{
+  // all segments share one geometry (body block + dorsal fin), scaled down
+  // toward the tail
+  const segmentGeometry = mergeGeometries([
+    new THREE.BoxGeometry(2.0, 2.0, 2.3),
+    new THREE.BoxGeometry(0.15, 0.9, 1.2).translate(0, 1.35, 0), // fin
+  ]);
+  for (let i = 0; i < DRAGON.segments; i++) {
+    const segment = new THREE.Mesh(segmentGeometry, ghostMaterial);
+    segment.scale.setScalar(1 - i * 0.04);
+    ghostDragon.add(segment);
+    dragonSegments.push(segment);
+  }
+}
+scene.add(ghostDragon);
+
+const DRAGON_THOUGHTS = [
+  'The dragon does not notice you.\n\nThe dragon noticed you before you\narrived. There is a difference.',
+  'It is very old and very transparent.\n\nIt circles because the sandbox is\nthe only thing left worth guarding.',
+  'You cannot ride the dragon.\n\nThe dragon can, however,\nride the dragon.',
+];
+let dragonThoughtIndex = 0;
+
+CLICKABLES.push({
+  object: ghostDragon,
+  onClick: () => {
+    dragonExcite = 1; // it quickens, flattered
+    playPartials([
+      [73, 0.2, 2.6],
+      [55, 0.16, 3.2, 0.08],
+      [110, 0.1, 1.8, 0.05],
+      [146.8, 0.05, 1.2, 0.12], // a roar like a cathedral clearing its throat
+    ]);
+    if (Math.random() < 0.4) {
+      openParchment(DRAGON_THOUGHTS[dragonThoughtIndex++ % DRAGON_THOUGHTS.length]);
+    }
+  },
+});
+
 // --- the music box ---
 // on the path to the graveyard. Click it: the lid opens and it plays a
 // small lullaby that is never quite the same twice.
@@ -1810,6 +1903,8 @@ function collide(pos) {
 
 const clock = new THREE.Clock();
 const scratchDir = new THREE.Vector3();
+const scratchA = new THREE.Vector3();
+const scratchB = new THREE.Vector3();
 
 renderer.setAnimationLoop(() => {
   const delta = Math.min(clock.getDelta(), 0.1);
@@ -2098,6 +2193,21 @@ renderer.setAnimationLoop(() => {
   // a touched aurora settles back down
   if (auroraBurst.value > 0.01) auroraBurst.value *= Math.exp(-1.5 * delta);
 
+  // the ghost dragon soars its endless lap, head first, body following
+  if (dragonExcite > 0.01) dragonExcite *= Math.exp(-0.8 * delta);
+  dragonTheta += DRAGON.speed * (1 + dragonExcite * 1.6) * delta;
+  dragonPath(dragonTheta, scratchA);
+  dragonPath(dragonTheta + DRAGON.spacing * 2, scratchB);
+  dragonHead.position.copy(scratchA);
+  dragonHead.lookAt(scratchB);
+  for (let i = 0; i < dragonSegments.length; i++) {
+    const th = dragonTheta - (i + 1) * DRAGON.spacing;
+    dragonPath(th, scratchA);
+    dragonSegments[i].position.copy(scratchA);
+    dragonPath(th + DRAGON.spacing, scratchB);
+    dragonSegments[i].lookAt(scratchB);
+  }
+
   // the last fruit in the universe, falling
   if (fruitFalling) {
     fruit.position.y -= 5 * delta;
@@ -2183,6 +2293,8 @@ if (window.location.hash === '#debug') {
       stonesVisited: visitedStones.size,
       airJumpsLeft,
       airDashLeft,
+      dragonExcite: +dragonExcite.toFixed(2),
+      dragonPos: dragonHead.position.toArray().map((v) => +v.toFixed(1)),
     }),
   };
 
