@@ -173,6 +173,21 @@ const SIGN_TEXT = [
   '— M',
 ].join('\n');
 
+// the same sign reads differently on the other side of the door
+const UNDERWORLD_SIGN_TEXT = [
+  'Traveler,',
+  '',
+  'Welcome to the other side of the',
+  'door. The tower wears a hat here.',
+  'We do not discuss the hat.',
+  '',
+  'Everything in the dark world casts',
+  'a shadow. This is where the shadows',
+  'come to be silly.',
+  '',
+  '— M (probably)',
+].join('\n');
+
 function makeSignTexture() {
   const canvas = document.createElement('canvas');
   canvas.width = 512;
@@ -220,8 +235,11 @@ sign.add(signBoard);
 sign.position.set(0, 0, TOWER.z + TOWER.depth / 2 + 0.9);
 scene.add(sign);
 
-// everything the player can click to read — more entries pushed below
-const CLICKABLES = [{ object: sign, text: SIGN_TEXT }];
+// everything the player can click to read — more entries pushed below.
+// `text` may be a function, evaluated at click time (world-dependent).
+const CLICKABLES = [
+  { object: sign, text: () => (inverted ? UNDERWORLD_SIGN_TEXT : SIGN_TEXT) },
+];
 
 // ---------- curiosities scattered around the void ----------
 
@@ -417,6 +435,20 @@ const TOP_MESSAGE = [
   '',
   'The view is yours.',
   'The fall is optional.',
+].join('\n');
+
+const TOP_MESSAGE_UNDER = [
+  'THE TOP OF NOWHERE',
+  '(UNDERSIDE)',
+  '',
+  'You climbed all the way up here',
+  'in the silly world. The stairs are',
+  'very proud of you. The flag has no',
+  'idea which way is down anymore.',
+  '',
+  'Neither do you.',
+  '',
+  "Isn't it great?",
 ].join('\n');
 
 {
@@ -835,7 +867,18 @@ const ORACLE = [
   'The dust rises because it remembers being stars.',
   'There is no exit. There is also no entrance. And yet.',
 ];
+// in the underworld the lectern lightens up considerably
+const UNDERWORLD_ORACLE = [
+  'Somewhere above you, a very serious\nworld is worried about you.',
+  'The tea in the cup is exactly as old\nas you are. Do not drink it.\nIt is not done yet.',
+  'The balloons are not tied down.\nThey stay because they are polite.',
+  'Here, the graves grow flowers.\nNothing is buried.\nEverything is planted.',
+  'The watchers wear party hats now.\nThey are still watching.\nBut festively.',
+  'Turn around three times and the\nlollipop trees will pretend they\nnever moved. They moved.',
+];
+
 let oracleIndex = Math.floor(Math.random() * ORACLE.length);
+let underOracleIndex = Math.floor(Math.random() * UNDERWORLD_ORACLE.length);
 
 {
   const lectern = new THREE.Group();
@@ -857,8 +900,15 @@ let oracleIndex = Math.floor(Math.random() * ORACLE.length);
   CLICKABLES.push({
     object: lectern,
     onClick: () => {
-      oracleIndex = (oracleIndex + 1) % ORACLE.length;
-      openParchment(`The lectern whispers:\n\n“${ORACLE[oracleIndex]}”`);
+      let line;
+      if (inverted) {
+        underOracleIndex = (underOracleIndex + 1) % UNDERWORLD_ORACLE.length;
+        line = UNDERWORLD_ORACLE[underOracleIndex];
+      } else {
+        oracleIndex = (oracleIndex + 1) % ORACLE.length;
+        line = ORACLE[oracleIndex];
+      }
+      openParchment(`The lectern whispers:\n\n“${line}”`);
     },
   });
 }
@@ -1628,6 +1678,11 @@ const DOOR = { x: -30, z: 20, halfAperture: 1.0 };
 }
 
 let inverted = false;
+
+// structures that only exist on the other side of the door — populated
+// by the underworld section below
+const UNDERWORLD_ONLY = [];
+
 const INVERT_MATERIALS = [
   towerMaterial,
   stairMaterial,
@@ -1647,6 +1702,9 @@ function setInverted(on) {
   const fg = on ? 0x141414 : 0xffffff;
   for (const m of INVERT_MATERIALS) m.color.set(fg);
   poolFallbackMaterial.color.set(on ? 0xdedad0 : 0x131313);
+  for (const o of UNDERWORLD_ONLY) o.visible = on;
+  motes.visible = !on; // rising dust above, falling confetti below
+  confetti.visible = on;
 }
 
 // ---------- zany reactions ----------
@@ -1830,6 +1888,214 @@ for (const ribbon of auroraRibbons) {
   });
 }
 
+// ---------- the underworld dresses up ----------
+// Above, color only lives in living things. Down here, everything
+// turns out to be alive. These structures exist only on the far side
+// of the lone door.
+
+const WHIMSY = [0xff5ca8, 0x27e0b8, 0xffd873, 0x7a5cff, 0x5cc8ff];
+const whimsyMaterial = (hex) =>
+  new THREE.MeshStandardMaterial({ color: hex, fog: false });
+
+function underworldAdd(object) {
+  object.visible = false;
+  UNDERWORLD_ONLY.push(object);
+  return object;
+}
+
+// -- the tower's party hat (we do not discuss the hat) --
+{
+  const hat = new THREE.Group();
+  const cone = new THREE.Mesh(
+    new THREE.ConeGeometry(5.6, 7.5, 16),
+    whimsyMaterial(0xff5ca8)
+  );
+  cone.position.y = TOWER.height + 3.4;
+  const pompom = new THREE.Mesh(
+    new THREE.SphereGeometry(0.9, 10, 10),
+    whimsyMaterial(0xffd873)
+  );
+  pompom.position.y = TOWER.height + 7.4;
+  hat.add(cone, pompom);
+  towerGroup.add(hat); // leans with the tower, obviously
+  underworldAdd(hat);
+}
+
+// -- party hats for the watchers (still watching, but festively) --
+{
+  const hatGeometry = new THREE.ConeGeometry(0.5, 1.0, 10);
+  watcherPivots.forEach((pivot, i) => {
+    const hat = new THREE.Mesh(
+      hatGeometry,
+      whimsyMaterial(WHIMSY[i % WHIMSY.length])
+    );
+    hat.position.y = 5.15;
+    hat.rotation.z = 0.12; // set at a rakish angle
+    pivot.add(hat);
+    underworldAdd(hat);
+  });
+}
+
+// -- a giant teacup, steeping in the mirror pool --
+{
+  const teacup = new THREE.Group();
+  const cupMaterial = new THREE.MeshStandardMaterial({
+    color: 0xffc4dd,
+    fog: false,
+    side: THREE.DoubleSide,
+  });
+  const cup = new THREE.Mesh(
+    new THREE.LatheGeometry(
+      [
+        new THREE.Vector2(0.9, 0.02),
+        new THREE.Vector2(2.7, 0.12),
+        new THREE.Vector2(3.05, 0.9),
+        new THREE.Vector2(3.25, 2.4),
+      ],
+      28
+    ),
+    cupMaterial
+  );
+  const handle = new THREE.Mesh(
+    new THREE.TorusGeometry(1.0, 0.22, 10, 24),
+    cupMaterial
+  );
+  handle.position.set(3.6, 1.3, 0);
+  const tea = new THREE.Mesh(
+    new THREE.CylinderGeometry(3.0, 3.0, 0.05, 28),
+    new THREE.MeshBasicMaterial({ color: 0xb98455 })
+  );
+  tea.position.y = 2.0;
+  teacup.add(cup, handle, tea);
+  teacup.position.set(0, 0.03, 0);
+  scene.add(teacup);
+  underworldAdd(teacup);
+  COLLIDERS.push({ x: 0, z: 0, hw: 3.0, hd: 3.0, underworld: true });
+}
+
+// -- lollipop trees around the meadow --
+{
+  const TREES = [
+    [9, 16], [-7, 13], [15, 6], [-16, 12], [5, -9], [-6, -13], [13, -10],
+  ];
+  const sticks = [];
+  const headsByColor = new Map();
+  TREES.forEach(([x, z], i) => {
+    const height = 3.0 + Math.abs(jitter(i + 7)) * 1.6;
+    const radius = 0.85 + Math.abs(jitter(i + 77)) * 0.5;
+    sticks.push(
+      new THREE.CylinderGeometry(0.14, 0.16, height, 8).translate(x, height / 2, z)
+    );
+    const hex = WHIMSY[i % WHIMSY.length];
+    if (!headsByColor.has(hex)) headsByColor.set(hex, []);
+    headsByColor
+      .get(hex)
+      .push(new THREE.SphereGeometry(radius, 14, 12).translate(x, height + radius * 0.75, z));
+    COLLIDERS.push({ x, z, hw: 0.25, hd: 0.25, underworld: true });
+  });
+  const stickMesh = new THREE.Mesh(mergeGeometries(sticks), towerMaterial);
+  scene.add(stickMesh);
+  underworldAdd(stickMesh);
+  for (const [hex, geometries] of headsByColor) {
+    const heads = new THREE.Mesh(mergeGeometries(geometries), whimsyMaterial(hex));
+    scene.add(heads);
+    underworldAdd(heads);
+  }
+}
+
+// -- the graves grow flowers (nothing is buried; everything is planted) --
+{
+  const stems = [];
+  const bloomsByColor = new Map();
+  stoneGroups.forEach(({ group }, i) => {
+    for (let f = 0; f < 2; f++) {
+      const fx = group.position.x + jitter(i * 3 + f) * 0.7;
+      const fz = group.position.z + 0.55 + Math.abs(jitter(i * 5 + f)) * 0.3;
+      const h = 0.3 + Math.abs(jitter(i * 7 + f)) * 0.25;
+      stems.push(new THREE.CylinderGeometry(0.02, 0.02, h, 5).translate(fx, h / 2, fz));
+      const hex = WHIMSY[(i + f) % WHIMSY.length];
+      if (!bloomsByColor.has(hex)) bloomsByColor.set(hex, []);
+      bloomsByColor
+        .get(hex)
+        .push(new THREE.IcosahedronGeometry(0.09, 0).translate(fx, h + 0.07, fz));
+    }
+  });
+  const stemMesh = new THREE.Mesh(
+    mergeGeometries(stems),
+    new THREE.MeshStandardMaterial({ color: 0x7fce7f, fog: false })
+  );
+  scene.add(stemMesh);
+  underworldAdd(stemMesh);
+  for (const [hex, geometries] of bloomsByColor) {
+    const blooms = new THREE.Mesh(
+      mergeGeometries(geometries),
+      new THREE.MeshBasicMaterial({ color: hex })
+    );
+    scene.add(blooms);
+    underworldAdd(blooms);
+  }
+}
+
+// -- balloons on the lone door (they stay because they are polite) --
+const balloonBundle = new THREE.Group();
+{
+  const strings = [];
+  [
+    [-0.8, 1.6, 0.3, 0],
+    [-0.3, 2.3, -0.3, 1],
+    [0.2, 1.9, 0.4, 2],
+    [0.7, 2.5, -0.2, 3],
+    [1.0, 1.5, 0.1, 4],
+  ].forEach(([bx, by, bz, ci]) => {
+    const balloon = new THREE.Mesh(
+      new THREE.SphereGeometry(0.42, 12, 12),
+      whimsyMaterial(WHIMSY[ci])
+    );
+    balloon.scale.y = 1.15;
+    balloon.position.set(bx, by, bz);
+    balloonBundle.add(balloon);
+    const length = Math.hypot(bx, by, bz);
+    const string = new THREE.CylinderGeometry(0.012, 0.012, length, 4);
+    string.translate(0, length / 2, 0);
+    const stringMesh = new THREE.Mesh(string, towerMaterial);
+    stringMesh.lookAt(bx, by, bz);
+    stringMesh.rotateX(Math.PI / 2); // cylinder Y-axis onto the lookAt ray
+    balloonBundle.add(stringMesh);
+  });
+  balloonBundle.position.set(DOOR.x, 4.85, DOOR.z);
+  scene.add(balloonBundle);
+  underworldAdd(balloonBundle);
+}
+
+// -- confetti instead of dust --
+const CONFETTI_COUNT = 500;
+const confettiSpeeds = new Float32Array(CONFETTI_COUNT);
+const confettiGeometry = new THREE.BufferGeometry();
+{
+  const positions = new Float32Array(CONFETTI_COUNT * 3);
+  const colors = new Float32Array(CONFETTI_COUNT * 3);
+  const color = new THREE.Color();
+  for (let i = 0; i < CONFETTI_COUNT; i++) {
+    positions[i * 3] = jitter(i * 11) * (WORLD_SIZE / 2);
+    positions[i * 3 + 1] = Math.abs(jitter(i * 11 + 1)) * WORLD_HEIGHT;
+    positions[i * 3 + 2] = jitter(i * 11 + 2) * (WORLD_SIZE / 2);
+    confettiSpeeds[i] = 0.4 + Math.abs(jitter(i * 13)) * 0.8;
+    color.setHex(WHIMSY[i % WHIMSY.length]);
+    colors[i * 3] = color.r;
+    colors[i * 3 + 1] = color.g;
+    colors[i * 3 + 2] = color.b;
+  }
+  confettiGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  confettiGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+}
+const confetti = new THREE.Points(
+  confettiGeometry,
+  new THREE.PointsMaterial({ size: 0.18, vertexColors: true, transparent: true, opacity: 0.85 })
+);
+confetti.visible = false;
+confetti.frustumCulled = false;
+scene.add(confetti);
+
 const keyLight = new THREE.DirectionalLight(0xffffff, 2.5);
 keyLight.position.set(30, 50, 40);
 scene.add(keyLight);
@@ -1938,7 +2204,7 @@ canvas.addEventListener('click', (e) => {
   const target = clickableAt(e);
   if (!target) return;
   if (target.onClick) target.onClick();
-  else openParchment(target.text);
+  else openParchment(typeof target.text === 'function' ? target.text() : target.text);
 });
 
 // pointer cursor when hovering anything readable
@@ -2035,8 +2301,10 @@ function collide(pos) {
   pos.x = THREE.MathUtils.clamp(pos.x, -bound, bound);
   pos.z = THREE.MathUtils.clamp(pos.z, -bound, bound);
 
-  // push out of solid structures (AABB + player radius)
+  // push out of solid structures (AABB + player radius); some things
+  // are only solid in the underworld
   for (const c of COLLIDERS) {
+    if (c.underworld && !inverted) continue;
     const hw = c.hw + PLAYER_RADIUS;
     const hd = c.hd + PLAYER_RADIUS;
     const dx = pos.x - c.x;
@@ -2180,7 +2448,7 @@ renderer.setAnimationLoop(() => {
         [783.99, 0.04, 2.2, 0.24],
         [1046.5, 0.03, 2.6, 0.36], // a quiet fanfare
       ]);
-      openParchment(TOP_MESSAGE);
+      openParchment(inverted ? TOP_MESSAGE_UNDER : TOP_MESSAGE);
     }
   } else if (topReached && feetY < 5) {
     topReached = false; // the summit will greet you again next climb
@@ -2395,14 +2663,24 @@ renderer.setAnimationLoop(() => {
     }
   }
 
-  // motes drift upward and wrap
-  {
+  // dust rises above; confetti falls below
+  if (!inverted) {
     const arr = motesGeometry.attributes.position.array;
     for (let i = 0; i < MOTE_COUNT; i++) {
       arr[i * 3 + 1] += moteSpeeds[i] * delta;
       if (arr[i * 3 + 1] > WORLD_HEIGHT) arr[i * 3 + 1] = 0;
     }
     motesGeometry.attributes.position.needsUpdate = true;
+  } else {
+    const arr = confettiGeometry.attributes.position.array;
+    for (let i = 0; i < CONFETTI_COUNT; i++) {
+      arr[i * 3 + 1] -= confettiSpeeds[i] * delta;
+      if (arr[i * 3 + 1] < 0) arr[i * 3 + 1] = WORLD_HEIGHT;
+    }
+    confettiGeometry.attributes.position.needsUpdate = true;
+    // the balloons sway; they are having a lovely time
+    balloonBundle.rotation.z = Math.sin(t * 0.7) * 0.06;
+    balloonBundle.position.y = 4.85 + Math.sin(t * 0.9) * 0.12;
   }
 
   renderer.render(scene, camera);
