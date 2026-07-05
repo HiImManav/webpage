@@ -1309,6 +1309,157 @@ CLICKABLES.push({
   },
 });
 
+// --- cerberus ---
+// One dog, three heads, zero consensus. It guards the lone door, which
+// is a difficult job in a world where walking through the door turns
+// the dark to light: nobody can agree which side is the underworld.
+// The collars are colored because the dog, all of it, is alive.
+
+const CERBERUS = { x: -24.5, z: 20 };
+
+const cerberus = new THREE.Group();
+cerberus.position.set(CERBERUS.x, 0, CERBERUS.z);
+cerberus.rotation.y = -0.35; // mostly facing spawn, one eye on the door
+
+const cerberusBody = new THREE.Mesh(
+  mergeGeometries([
+    new THREE.BoxGeometry(2.4, 1.7, 1.9).translate(0, 0.85, -0.8), // haunches
+    new THREE.BoxGeometry(2.0, 1.9, 1.5).translate(0, 1.15, 0.5), // chest
+    new THREE.BoxGeometry(0.45, 1.5, 0.5).translate(-0.6, 0.75, 1.0), // front legs
+    new THREE.BoxGeometry(0.45, 1.5, 0.5).translate(0.6, 0.75, 1.0),
+    new THREE.BoxGeometry(0.5, 0.3, 0.8).translate(-0.6, 0.15, 1.35), // paws
+    new THREE.BoxGeometry(0.5, 0.3, 0.8).translate(0.6, 0.15, 1.35),
+    new THREE.BoxGeometry(0.35, 0.35, 1.3).rotateX(-0.6).translate(0, 1.7, -1.9), // tail
+    // three necks, the outer two leaning outward
+    new THREE.BoxGeometry(0.45, 1.3, 0.45).rotateZ(0.3).translate(-0.85, 2.35, 0.8),
+    new THREE.BoxGeometry(0.45, 1.45, 0.45).translate(0, 2.4, 0.85),
+    new THREE.BoxGeometry(0.45, 1.3, 0.45).rotateZ(-0.3).translate(0.85, 2.35, 0.8),
+  ]),
+  towerMaterial
+);
+cerberus.add(cerberusBody);
+
+const CERBERUS_COLLARS = [0xffd873, 0x5cc8ff, 0x7a5cff]; // amber, duty-blue, dream-violet
+const cerberusHeads = [];
+const cerberusPerk = [0, 0, 0];
+
+[-1.05, 0, 1.05].forEach((offsetX, i) => {
+  const head = new THREE.Group();
+  head.position.set(offsetX, i === 1 ? 3.15 : 2.95, 0.9);
+
+  const skullAndEars = new THREE.Mesh(
+    mergeGeometries([
+      new THREE.BoxGeometry(0.85, 0.75, 0.9).translate(0, 0.35, 0), // skull
+      new THREE.BoxGeometry(0.5, 0.4, 0.6).translate(0, 0.25, 0.68), // snout
+      new THREE.BoxGeometry(0.18, 0.42, 0.12).translate(-0.28, 0.9, -0.1), // ears
+      new THREE.BoxGeometry(0.18, 0.42, 0.12).translate(0.28, 0.9, -0.1),
+    ]),
+    towerMaterial
+  );
+  head.add(skullAndEars);
+
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(
+      new THREE.BoxGeometry(0.1, 0.16, 0.05),
+      slitMaterial
+    );
+    eye.position.set(side * 0.22, 0.42, 0.46);
+    head.add(eye);
+  }
+
+  const collar = new THREE.Mesh(
+    new THREE.BoxGeometry(0.6, 0.16, 0.6),
+    new THREE.MeshBasicMaterial({ color: CERBERUS_COLLARS[i] })
+  );
+  collar.position.y = -0.12;
+  head.add(collar);
+
+  cerberus.add(head);
+  cerberusHeads.push(head);
+});
+
+scene.add(cerberus);
+COLLIDERS.push({ x: CERBERUS.x, z: CERBERUS.z, hw: 1.6, hd: 1.8 });
+
+const CERBERUS_LINES = [
+  [
+    // left head: the enthusiast. Convinced the door leads somewhere bright.
+    'HELLO! HELLO. HELLO.\n\nThe other two say I should not\ngreet intruders. But you are not an\nintruder, you are a VISITOR, and\nvisitors are the best thing that\nhappens all century.',
+    'Ignore the middle one. He thinks\nthis is the gate to the underworld.\nIt is obviously the door to the nice\nbright place. I have seen it.\nI want to go.',
+    'If you throw something,\nI will bring it back.\n\nThis is a promise\nand also a warning.',
+  ],
+  [
+    // middle head: the professional. On duty since before the void.
+    'HALT.\n\nWell. You have already been walking\naround for some time, so:\nhalt retroactively.',
+    'This is the gate to the underworld\nand we are its guard. The left head\ndisagrees. The right head is asleep.\nI am the only professional here.',
+    'Do not go through the door. Or do.\nTechnically the rules only say we\nmust guard it, not that it must stay\nshut. The rules were written poorly\nand I have filed complaints.',
+  ],
+  [
+    // right head: the philosopher, mostly asleep.
+    'mm.\n\nWe guard a door in a world where\nwalking through it turns the dark\nto light. So which side is the\nunderworld, do you think?\n\nThe others hate this question.',
+    'One dog, three opinions.\nThe body walks anyway.\n\nI find this instructive.\nThey find it annoying.',
+    'I dreamed the door opened and both\nsides were the same place.\n\nI have not told the other two.\nThey need the argument.',
+  ],
+];
+const CERBERUS_BARKS = [
+  [
+    [540, 0.09, 0.12],
+    [660, 0.09, 0.12, 0.14], // two eager yips
+  ],
+  [
+    [120, 0.16, 0.25],
+    [85, 0.12, 0.3, 0.05], // one stern WOOF
+  ],
+  [
+    [220, 0.06, 1.2],
+    [165, 0.05, 1.6, 0.15], // half a howl, half a yawn
+  ],
+];
+const cerberusLineIndex = [0, 0, 0];
+
+cerberusHeads.forEach((head, i) => {
+  CLICKABLES.push({
+    object: head,
+    onClick: () => {
+      cerberusPerk[i] = 1;
+      playPartials(CERBERUS_BARKS[i]);
+      openParchment(
+        CERBERUS_LINES[i][cerberusLineIndex[i]++ % CERBERUS_LINES[i].length]
+      );
+    },
+  });
+});
+
+CLICKABLES.push({
+  object: cerberusBody,
+  onClick: () => {
+    cerberusPerk[0] = cerberusPerk[1] = cerberusPerk[2] = 1;
+    playPartials([
+      [540, 0.08, 0.12],
+      [120, 0.14, 0.25, 0.15],
+      [220, 0.05, 1.0, 0.35],
+      [660, 0.08, 0.12, 0.5],
+      [85, 0.1, 0.3, 0.6], // all three at once, which settles nothing
+    ]);
+    openParchment(
+      [
+        'THE DOG ARGUES WITH ITSELF',
+        '',
+        'LEFT: The door leads OUT.',
+        'MIDDLE: The door leads UNDER.',
+        'RIGHT: The door leads through.',
+        '',
+        'LEFT: We should be called Biscuit.',
+        'MIDDLE: We are called WARDEN.',
+        'RIGHT: We have never been called.',
+        '',
+        'The tail, which has no opinion,',
+        'wags.',
+      ].join('\n')
+    );
+  },
+});
+
 // --- the music box ---
 // on the path to the graveyard. Click it: the lid opens and it plays a
 // small lullaby that is never quite the same twice.
@@ -2193,6 +2344,19 @@ renderer.setAnimationLoop(() => {
   // a touched aurora settles back down
   if (auroraBurst.value > 0.01) auroraBurst.value *= Math.exp(-1.5 * delta);
 
+  // cerberus: three heads, three tempers, one shared spine
+  for (let i = 0; i < 3; i++) {
+    if (cerberusPerk[i] > 0.01) cerberusPerk[i] *= Math.exp(-2.5 * delta);
+  }
+  cerberusHeads[0].rotation.y = 0.25 + Math.sin(t * 2.8) * 0.16; // eager wiggle
+  cerberusHeads[0].rotation.z = Math.sin(t * 2.1) * 0.07;
+  cerberusHeads[0].rotation.x = -cerberusPerk[0] * 0.35;
+  cerberusHeads[1].rotation.y = Math.sin(t * 0.45) * 0.4; // dutiful scan
+  cerberusHeads[1].rotation.x = -cerberusPerk[1] * 0.35;
+  cerberusHeads[2].rotation.y = -0.25 + Math.sin(t * 0.3) * 0.1; // dozing drift
+  cerberusHeads[2].rotation.x =
+    0.18 + Math.sin(t * 0.75) * 0.09 - cerberusPerk[2] * 0.5;
+
   // the ghost dragon soars its endless lap, head first, body following
   if (dragonExcite > 0.01) dragonExcite *= Math.exp(-0.8 * delta);
   dragonTheta += DRAGON.speed * (1 + dragonExcite * 1.6) * delta;
@@ -2295,6 +2459,9 @@ if (window.location.hash === '#debug') {
       airDashLeft,
       dragonExcite: +dragonExcite.toFixed(2),
       dragonPos: dragonHead.position.toArray().map((v) => +v.toFixed(1)),
+      cerberusHeadPos: cerberusHeads.map((h) =>
+        h.getWorldPosition(new THREE.Vector3()).toArray().map((v) => +v.toFixed(2))
+      ),
     }),
   };
 
