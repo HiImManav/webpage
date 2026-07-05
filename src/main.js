@@ -20,6 +20,7 @@ const settings = {
   crouchMultiplier: 0.5,
   jumpVelocity: 9,
   gravity: 26,
+  dashImpulse: 42, // air dash burst (damping eats it: distance ≈ impulse/damping)
   // look
   sensitivity: 0.0022,
   invertY: false,
@@ -1667,10 +1668,20 @@ const KEYMAP = {
   ShiftRight: 'sprint',
   KeyC: 'crouch',
   Space: 'jump',
+  KeyE: 'dash',
 };
+
+// edge-triggered presses (double jump and air dash need a fresh tap,
+// not a held key)
+let jumpQueued = false;
+let dashQueued = false;
 
 document.addEventListener('keydown', (e) => {
   if (!KEYMAP[e.code]) return;
+  if (!e.repeat) {
+    if (e.code === 'Space') jumpQueued = true;
+    if (e.code === 'KeyE') dashQueued = true;
+  }
   keys[KEYMAP[e.code]] = true;
   if (e.code === 'Space') e.preventDefault();
 });
@@ -1681,6 +1692,8 @@ document.addEventListener('keyup', (e) => {
 // alt-tabbing away with a key held would leave it stuck on
 window.addEventListener('blur', () => {
   for (const k of Object.keys(keys)) keys[k] = false;
+  jumpQueued = false;
+  dashQueued = false;
 });
 
 // ---------- movement / physics ----------
@@ -1691,6 +1704,9 @@ let verticalVelocity = 0;
 let grounded = true;
 let eyeHeight = EYE_HEIGHT; // smoothed toward stand/crouch target
 let bobPhase = 0;
+let airJumpsLeft = 1; // double jump charge, refilled on landing
+let airDashLeft = 1; // air dash charge, refilled on landing
+let dashFovPulse = 0;
 
 function collide(pos) {
   // stay inside the sandbox walls
@@ -1745,11 +1761,34 @@ renderer.setAnimationLoop(() => {
     velocity.x += (moveRight / inputLength) * accel * delta;
   }
 
-  // jump / gravity
+  // jump / double jump / gravity
   if (inputEnabled && keys.jump && grounded) {
     verticalVelocity = settings.jumpVelocity;
     grounded = false;
+    jumpQueued = false; // this press is spent on the ground jump
+  } else if (inputEnabled && jumpQueued && !grounded && airJumpsLeft > 0) {
+    airJumpsLeft--;
+    verticalVelocity = settings.jumpVelocity * 0.95;
+    playPartials([
+      [520, 0.06, 0.18],
+      [660, 0.05, 0.15, 0.05], // a small second wind
+    ]);
   }
+  jumpQueued = false;
+
+  // air dash: a burst in the direction you're facing, with a beat of hang
+  if (inputEnabled && dashQueued && !grounded && airDashLeft > 0) {
+    airDashLeft--;
+    velocity.z += settings.dashImpulse;
+    verticalVelocity *= 0.4;
+    dashFovPulse = 7;
+    playPartials([
+      [320, 0.08, 0.25],
+      [210, 0.06, 0.3, 0.03], // whoosh
+    ]);
+  }
+  dashQueued = false;
+
   // inside the crater ring, gravity loosens its grip
   const lowGravity =
     Math.hypot(camera.position.x - CRATER.x, camera.position.z - CRATER.z) <
@@ -1761,6 +1800,8 @@ renderer.setAnimationLoop(() => {
       feetY = 0;
       verticalVelocity = 0;
       grounded = true;
+      airJumpsLeft = 1;
+      airDashLeft = 1;
     }
   }
 
@@ -1804,8 +1845,10 @@ renderer.setAnimationLoop(() => {
 
   pos.y = feetY + eyeHeight + bob;
 
-  // sprint widens the FOV slightly for a sense of speed
-  const targetFov = settings.fov + (sprinting ? settings.sprintFovKick : 0);
+  // sprint widens the FOV slightly; an air dash punches it briefly
+  if (dashFovPulse > 0.01) dashFovPulse *= Math.exp(-6 * delta);
+  const targetFov =
+    settings.fov + (sprinting ? settings.sprintFovKick : 0) + dashFovPulse;
   if (Math.abs(camera.fov - targetFov) > 0.01) {
     camera.fov += (targetFov - camera.fov) * Math.min(1, 8 * delta);
     camera.updateProjectionMatrix();
@@ -2021,6 +2064,8 @@ if (window.location.hash === '#debug') {
       auroraBurst: +auroraBurst.value.toFixed(2),
       fruitFalling,
       stonesVisited: visitedStones.size,
+      airJumpsLeft,
+      airDashLeft,
     }),
   };
 
@@ -2040,6 +2085,7 @@ if (window.location.hash === '#debug') {
     movement.add(settings, 'crouchMultiplier', 0.1, 1, 0.05);
     movement.add(settings, 'jumpVelocity', 3, 20, 0.5);
     movement.add(settings, 'gravity', 5, 60, 1);
+    movement.add(settings, 'dashImpulse', 10, 100, 1);
 
     const look = gui.addFolder('look');
     look.add(settings, 'sensitivity', 0.0005, 0.01, 0.0001);
