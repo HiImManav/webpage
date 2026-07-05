@@ -399,21 +399,81 @@ scene.add(ghostCroc);
 const stairMaterial = new THREE.MeshStandardMaterial({ color: 0xffffff });
 
 const STAIRCASE = { x: 40, z: 12, radius: 5.5, count: 24 };
+
+// walkable surfaces: rotated-box footprints the player can land on
+const STEP_PLATFORMS = [];
+let topReached = false;
+
+const TOP_MESSAGE = [
+  'THE TOP OF NOWHERE',
+  '',
+  'You climbed a staircase that was',
+  'built to go nowhere, and you made',
+  'it go somewhere.',
+  '',
+  'That is the whole trick.',
+  'That is the entire secret',
+  'of everything.',
+  '',
+  'The view is yours.',
+  'The fall is optional.',
+].join('\n');
+
 {
   const steps = [];
   for (let i = 0; i < STAIRCASE.count; i++) {
     const angle = i * 0.5;
+    const rotY = -angle + Math.PI / 2;
+    const x = STAIRCASE.x + Math.cos(angle) * STAIRCASE.radius;
+    const y = 2.2 + i * 0.85;
+    const z = STAIRCASE.z + Math.sin(angle) * STAIRCASE.radius;
     steps.push(
-      new THREE.BoxGeometry(2.4, 0.25, 1.3)
-        .rotateY(-angle + Math.PI / 2)
-        .translate(
-          STAIRCASE.x + Math.cos(angle) * STAIRCASE.radius,
-          2.6 + i * 0.85,
-          STAIRCASE.z + Math.sin(angle) * STAIRCASE.radius
-        )
+      new THREE.BoxGeometry(2.4, 0.25, 1.3).rotateY(rotY).translate(x, y, z)
     );
+    STEP_PLATFORMS.push({
+      x,
+      z,
+      cos: Math.cos(rotY),
+      sin: Math.sin(rotY),
+      hw: 1.2,
+      hd: 0.65,
+      topY: y + 0.125,
+    });
   }
+
+  // the landing at the top, one last hop above the final step
+  const topAngle = STAIRCASE.count * 0.5;
+  const topX = STAIRCASE.x + Math.cos(topAngle) * STAIRCASE.radius;
+  const topZ = STAIRCASE.z + Math.sin(topAngle) * STAIRCASE.radius;
+  steps.push(
+    new THREE.BoxGeometry(3.4, 0.3, 3.4).translate(topX, 22.6, topZ)
+  );
+  STEP_PLATFORMS.push({
+    x: topX,
+    z: topZ,
+    cos: 1,
+    sin: 0,
+    hw: 1.7,
+    hd: 1.7,
+    topY: 22.75,
+  });
+
+  // a flagpole, because someone has to have been here first
+  steps.push(
+    new THREE.CylinderGeometry(0.05, 0.05, 2.2, 8).translate(
+      topX + 1.2,
+      23.85,
+      topZ + 1.2
+    )
+  );
   scene.add(new THREE.Mesh(mergeGeometries(steps), stairMaterial));
+
+  const pennant = new THREE.Mesh(
+    new THREE.BoxGeometry(0.75, 0.4, 0.04),
+    new THREE.MeshBasicMaterial({ color: 0x27e0b8 }) // color: proof of life
+  );
+  pennant.position.set(topX + 1.2 + 0.42, 24.7, topZ + 1.2);
+  scene.add(pennant);
 }
 
 // --- a caged moon in the far corner ---
@@ -1708,6 +1768,23 @@ let airJumpsLeft = 1; // double jump charge, refilled on landing
 let airDashLeft = 1; // air dash charge, refilled on landing
 let dashFovPulse = 0;
 
+// highest platform top under (x, z) that is not above refY — the floor
+// (0) is always a candidate. Platforms are one-way: you land on tops,
+// never bump your head from below.
+function supportHeightAt(x, z, refY) {
+  let best = 0;
+  for (const p of STEP_PLATFORMS) {
+    if (p.topY > refY || p.topY <= best) continue;
+    const dx = x - p.x;
+    const dz = z - p.z;
+    const lx = dx * p.cos - dz * p.sin;
+    const lz = dx * p.sin + dz * p.cos;
+    if (Math.abs(lx) > p.hw + 0.25 || Math.abs(lz) > p.hd + 0.25) continue;
+    best = p.topY;
+  }
+  return best;
+}
+
 function collide(pos) {
   // stay inside the sandbox walls
   const bound = WORLD_SIZE / 2 - PLAYER_RADIUS;
@@ -1795,9 +1872,15 @@ renderer.setAnimationLoop(() => {
     CRATER.radius;
   if (!grounded) {
     verticalVelocity -= settings.gravity * (lowGravity ? 0.25 : 1) * delta;
+    const prevFeetY = feetY;
     feetY += verticalVelocity * delta;
-    if (feetY <= 0) {
-      feetY = 0;
+    // when falling, land on the floor or any step top we crossed
+    const support =
+      verticalVelocity <= 0
+        ? supportHeightAt(camera.position.x, camera.position.z, prevFeetY + 0.01)
+        : 0;
+    if (feetY <= support) {
+      feetY = support;
       verticalVelocity = 0;
       grounded = true;
       airJumpsLeft = 1;
@@ -1828,6 +1911,33 @@ renderer.setAnimationLoop(() => {
   ) {
     verticalVelocity = PAD.boost;
     grounded = false;
+  }
+
+  // standing on platforms: small rises step up, walking off an edge falls
+  if (grounded) {
+    const support = supportHeightAt(pos.x, pos.z, feetY + 0.45);
+    if (support > feetY + 0.001) {
+      feetY = support;
+    } else if (support < feetY - 0.001) {
+      grounded = false;
+      verticalVelocity = 0;
+    }
+  }
+
+  // reaching the top of the staircase to nowhere
+  if (grounded && feetY > 22.7) {
+    if (!topReached) {
+      topReached = true;
+      playPartials([
+        [523.25, 0.05, 2.0],
+        [659.25, 0.04, 2.0, 0.12],
+        [783.99, 0.04, 2.2, 0.24],
+        [1046.5, 0.03, 2.6, 0.36], // a quiet fanfare
+      ]);
+      openParchment(TOP_MESSAGE);
+    }
+  } else if (topReached && feetY < 5) {
+    topReached = false; // the summit will greet you again next climb
   }
 
   // eye height: smooth stand <-> crouch transition
@@ -2043,6 +2153,13 @@ if (window.location.hash === '#debug') {
     camera,
     settings,
     keys,
+    // teleport with feet at a given height, falling from rest
+    drop: (x, y, z) => {
+      camera.position.set(x, y + EYE_HEIGHT, z);
+      feetY = y;
+      grounded = false;
+      verticalVelocity = 0;
+    },
     state: () => ({
       pos: camera.position.toArray(),
       fov: camera.fov,
