@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "next-devtools": {
+    "threejs-devtools": {
       "command": "npx",
-      "args": ["-y", "next-devtools-mcp@latest"]
+      "args": ["-y", "threejs-devtools-mcp"]
     }
   }
 }
