@@ -423,6 +423,7 @@ const STAIRCASE = { x: 40, z: 12, radius: 5.5, count: 24 };
 // walkable surfaces: rotated-box footprints the player can land on
 const STEP_PLATFORMS = [];
 let topReached = false;
+let pennantMaterial; // the summit flag drifts through hues
 
 const TOP_MESSAGE = [
   'THE TOP OF NOWHERE',
@@ -502,9 +503,10 @@ const TOP_MESSAGE_UNDER = [
   );
   scene.add(new THREE.Mesh(mergeGeometries(steps), stairMaterial));
 
+  pennantMaterial = new THREE.MeshBasicMaterial({ color: 0x27e0b8 }); // proof of life
   const pennant = new THREE.Mesh(
     new THREE.BoxGeometry(0.75, 0.4, 0.04),
-    new THREE.MeshBasicMaterial({ color: 0x27e0b8 }) // color: proof of life
+    pennantMaterial
   );
   pennant.position.set(topX + 1.2 + 0.42, 24.7, topZ + 1.2);
   scene.add(pennant);
@@ -947,20 +949,25 @@ const chimeTubes = [];
     const length = 2.1 - i * 0.2; // shorter tube, higher note
     const pivot = new THREE.Group();
     pivot.position.set(CHIMES.x - 1.2 + i * 0.6, 3.24, CHIMES.z);
+    const tubeMaterial = bellMaterial.clone(); // own color so it can flash
     const tube = new THREE.Mesh(
       new THREE.CylinderGeometry(0.07, 0.07, length, 10),
-      bellMaterial
+      tubeMaterial
     );
     tube.position.y = -length / 2;
     pivot.add(tube);
     scene.add(pivot);
-    const entry = { pivot, amp: 0, phase: 0 };
+    const entry = { pivot, material: tubeMaterial, amp: 0, phase: 0 };
     chimeTubes.push(entry);
     CLICKABLES.push({
       object: pivot,
       onClick: () => {
         entry.amp = 0.4;
         entry.phase = 0;
+        // flash the note's color, then fade back to the world's white
+        entry.material.color.setHex(
+          [0xff5ca8, 0xffd873, 0x27e0b8, 0x5cc8ff, 0x7a5cff][i]
+        );
         playPartials([
           [freq, 0.09, 1.8],
           [freq * 2.756, 0.02, 0.7], // chime-bar overtone
@@ -1119,16 +1126,17 @@ addAuroraRibbon(26.5, -49, 4.8, 0x27e0b8, 0xffd873);
 const GARDEN = { x: -46, z: -8, radius: 6 };
 const GARDEN_COLORS = [0x27e0b8, 0x7a5cff, 0xff5ca8, 0xffd873, 0x5cc8ff];
 
+const GARDEN_CRYSTAL_COUNT = 120;
+let gardenCrystals;
 {
-  const COUNT = 120;
-  const crystals = new THREE.InstancedMesh(
+  gardenCrystals = new THREE.InstancedMesh(
     new THREE.ConeGeometry(0.12, 0.55, 5),
     new THREE.MeshBasicMaterial(),
-    COUNT
+    GARDEN_CRYSTAL_COUNT
   );
   const dummy = new THREE.Object3D();
   const color = new THREE.Color();
-  for (let i = 0; i < COUNT; i++) {
+  for (let i = 0; i < GARDEN_CRYSTAL_COUNT; i++) {
     const r = Math.sqrt(Math.abs(jitter(i))) * GARDEN.radius;
     const angle = jitter(i + 200) * Math.PI;
     const scale = 0.6 + Math.abs(jitter(i + 400)) * 1.3;
@@ -1140,13 +1148,13 @@ const GARDEN_COLORS = [0x27e0b8, 0x7a5cff, 0xff5ca8, 0xffd873, 0x5cc8ff];
     dummy.rotation.set(jitter(i + 600) * 0.15, jitter(i + 800) * Math.PI, jitter(i + 1000) * 0.15);
     dummy.scale.setScalar(scale);
     dummy.updateMatrix();
-    crystals.setMatrixAt(i, dummy.matrix);
+    gardenCrystals.setMatrixAt(i, dummy.matrix);
     color.setHex(GARDEN_COLORS[Math.abs(Math.round(jitter(i + 1200) * 100)) % GARDEN_COLORS.length]);
     color.multiplyScalar(0.7 + Math.abs(jitter(i + 1400)) * 0.3);
-    crystals.setColorAt(i, color);
+    gardenCrystals.setColorAt(i, color);
   }
-  crystals.frustumCulled = false; // instances span the patch, not the cone
-  scene.add(crystals);
+  gardenCrystals.frustumCulled = false; // instances span the patch, not the cone
+  scene.add(gardenCrystals);
 }
 
 // the garden's plaque
@@ -1392,6 +1400,7 @@ const cerberusBody = new THREE.Mesh(
 cerberus.add(cerberusBody);
 
 const CERBERUS_COLLARS = [0xffd873, 0x5cc8ff, 0x7a5cff]; // amber, duty-blue, dream-violet
+const cerberusCollarMaterials = []; // they trade periodically; they mind
 const cerberusHeads = [];
 const cerberusPerk = [0, 0, 0];
 
@@ -1419,9 +1428,13 @@ const cerberusPerk = [0, 0, 0];
     head.add(eye);
   }
 
+  const collarMaterial = new THREE.MeshBasicMaterial({
+    color: CERBERUS_COLLARS[i],
+  });
+  cerberusCollarMaterials.push(collarMaterial);
   const collar = new THREE.Mesh(
     new THREE.BoxGeometry(0.6, 0.16, 0.6),
-    new THREE.MeshBasicMaterial({ color: CERBERUS_COLLARS[i] })
+    collarMaterial
   );
   collar.position.y = -0.12;
   head.add(collar);
@@ -2098,6 +2111,45 @@ confetti.visible = false;
 confetti.frustumCulled = false;
 scene.add(confetti);
 
+// ---------- the player's color trail ----------
+// You are a living thing, so you leave color: a ribbon of little cubes
+// that drifts through the spectrum as you move and fades back into
+// whichever void you're in. It follows you through the air, so dashes
+// and skips paint arcs.
+
+const TRAIL_COUNT = 48;
+const TRAIL_LIFE = 1.5; // seconds
+const trailPositions = Array.from({ length: TRAIL_COUNT }, () => new THREE.Vector3());
+const trailAges = new Float32Array(TRAIL_COUNT).fill(TRAIL_LIFE + 1);
+const trailHues = new Float32Array(TRAIL_COUNT);
+let trailCursor = 0;
+let trailNextSpawn = 0;
+const trailLastPos = new THREE.Vector3(0, 0, 999);
+const trailDummy = new THREE.Object3D();
+const scratchColor = new THREE.Color();
+
+const trailMesh = new THREE.InstancedMesh(
+  new THREE.BoxGeometry(1, 1, 1),
+  new THREE.MeshBasicMaterial(),
+  TRAIL_COUNT
+);
+trailMesh.frustumCulled = false;
+{
+  // initialize every slot invisible so untouched instances never flash
+  trailDummy.scale.setScalar(0.001);
+  trailDummy.updateMatrix();
+  for (let i = 0; i < TRAIL_COUNT; i++) {
+    trailMesh.setMatrixAt(i, trailDummy.matrix);
+    trailMesh.setColorAt(i, scratchColor.setHex(0x000000));
+  }
+}
+scene.add(trailMesh);
+
+// timers for the colors that change their minds
+let nextCrystalSwap = 0;
+let nextCollarTrade = 12;
+let collarShift = 0;
+
 const keyLight = new THREE.DirectionalLight(0xffffff, 2.5);
 keyLight.position.set(30, 50, 40);
 scene.add(keyLight);
@@ -2556,13 +2608,82 @@ renderer.setAnimationLoop(() => {
     bellPivot.rotation.z = Math.sin(bellPhase) * bellAmp;
   }
 
-  // struck chime tubes swing the same way
+  // struck chime tubes swing, and their flash fades back to the
+  // world's current idea of white (bellMaterial tracks the inversion)
   for (const c of chimeTubes) {
     if (c.amp > 0.001) {
       c.phase += 9 * delta;
       c.amp *= Math.exp(-1.6 * delta);
       c.pivot.rotation.x = Math.sin(c.phase) * c.amp;
     }
+    c.material.color.lerp(bellMaterial.color, Math.min(1, 2.5 * delta));
+  }
+
+  // the summit pennant cycles its allegiance
+  pennantMaterial.color.setHSL((t * 0.05) % 1, 0.7, 0.6);
+
+  // fireflies carry a slow gradient around the swarm
+  {
+    const cols = firefliesGeometry.attributes.color;
+    for (let i = 0; i < FIREFLY_COUNT; i++) {
+      scratchColor.setHSL((i / FIREFLY_COUNT + t * 0.03) % 1, 0.8, 0.62);
+      cols.setXYZ(i, scratchColor.r, scratchColor.g, scratchColor.b);
+    }
+    cols.needsUpdate = true;
+  }
+
+  // every few seconds a handful of garden crystals change their minds
+  if (t > nextCrystalSwap) {
+    nextCrystalSwap = t + 4 + Math.random() * 4;
+    for (let n = 0; n < 6; n++) {
+      const idx = Math.floor(Math.random() * GARDEN_CRYSTAL_COUNT);
+      scratchColor.setHex(WHIMSY[Math.floor(Math.random() * WHIMSY.length)]);
+      scratchColor.multiplyScalar(0.7 + Math.random() * 0.3);
+      gardenCrystals.setColorAt(idx, scratchColor);
+    }
+    gardenCrystals.instanceColor.needsUpdate = true;
+  }
+
+  // every so often the heads trade collars. They notice. They mind.
+  if (t > nextCollarTrade) {
+    nextCollarTrade = t + 12;
+    collarShift = (collarShift + 1) % 3;
+    cerberusCollarMaterials.forEach((m, i) =>
+      m.color.setHex(CERBERUS_COLLARS[(i + collarShift) % 3])
+    );
+  }
+
+  // the player's fading rainbow
+  if (
+    t > trailNextSpawn &&
+    scratchA.set(pos.x, feetY, pos.z).distanceToSquared(trailLastPos) > 0.09
+  ) {
+    trailNextSpawn = t + 0.055;
+    trailLastPos.copy(scratchA);
+    trailAges[trailCursor] = 0;
+    trailHues[trailCursor] = (t * 0.12) % 1;
+    trailPositions[trailCursor].set(
+      pos.x + (Math.random() - 0.5) * 0.25,
+      feetY + 0.22 + Math.random() * 0.2,
+      pos.z + (Math.random() - 0.5) * 0.25
+    );
+    trailCursor = (trailCursor + 1) % TRAIL_COUNT;
+  }
+  {
+    const bg = scene.background;
+    for (let i = 0; i < TRAIL_COUNT; i++) {
+      if (trailAges[i] > TRAIL_LIFE) continue; // already faded to nothing
+      trailAges[i] += delta;
+      const k = Math.min(1, trailAges[i] / TRAIL_LIFE);
+      trailDummy.position.copy(trailPositions[i]);
+      trailDummy.rotation.set(0, trailHues[i] * Math.PI * 2, 0.5);
+      trailDummy.scale.setScalar(Math.max(0.001, 0.24 * (1 - k)));
+      trailDummy.updateMatrix();
+      trailMesh.setMatrixAt(i, trailDummy.matrix);
+      trailMesh.setColorAt(i, scratchColor.setHSL(trailHues[i], 0.85, 0.6).lerp(bg, k));
+    }
+    trailMesh.instanceMatrix.needsUpdate = true;
+    trailMesh.instanceColor.needsUpdate = true;
   }
 
   // crater shards orbit and bob
@@ -2591,7 +2712,12 @@ renderer.setAnimationLoop(() => {
     firefliesGeometry.attributes.position.needsUpdate = true;
   }
 
-  // the prism spins, bobs, and flares when touched mid-jump
+  // the prism spins, bobs, breathes through the spectrum, and flares
+  // when touched mid-jump
+  const prismHue = (t * 0.04) % 1;
+  prism.material.emissive.setHSL(prismHue, 0.65, 0.35);
+  prism.material.color.setHSL(prismHue, 0.45, 0.8);
+  prismLight.color.setHSL(prismHue, 0.75, 0.6);
   prism.rotation.y = t * 0.5;
   prism.rotation.x = t * 0.23;
   prism.position.y = PRISM.y + Math.sin(t * 0.7) * 0.3;
@@ -2754,6 +2880,9 @@ if (window.location.hash === '#debug') {
       airJumpsLeft,
       airDashLeft,
       dashBounces,
+      trailLive: trailAges.filter((a) => a < TRAIL_LIFE).length,
+      collarShift,
+      prismLightHex: prismLight.color.getHex(),
       dragonExcite: +dragonExcite.toFixed(2),
       dragonPos: dragonHead.position.toArray().map((v) => +v.toFixed(1)),
       cerberusHeadPos: cerberusHeads.map((h) =>
