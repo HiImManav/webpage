@@ -2150,6 +2150,172 @@ let nextCrystalSwap = 0;
 let nextCollarTrade = 12;
 let collarShift = 0;
 
+// ---------- the dice room ----------
+// A weird little door stands near spawn: crooked, floating slightly,
+// breathing, open onto somewhere dark. Walk through it and you are
+// somewhere else entirely: a black nothing, a giant die, an exit door,
+// and — suddenly — an axe in your hands. No explanation is provided.
+// (Falling off the die also brings you home. Eventually.)
+
+const WEIRD_DOOR = { x: 16, z: 28 };
+const DICE = { x: 700, z: 700, size: 30 }; // far beyond the fog
+let diceWorldActive = false;
+let axeSwingT = 0;
+
+const portalMaterial = new THREE.MeshBasicMaterial({
+  color: 0x1a0a2a,
+  side: THREE.DoubleSide,
+});
+
+// crooked trapezoid frame with uneven feet; nothing about it is plumb
+function buildWeirdFrame() {
+  const frame = new THREE.Group();
+  const bones = new THREE.Mesh(
+    mergeGeometries([
+      new THREE.BoxGeometry(0.34, 3.6, 0.42).rotateZ(0.09).translate(-1.05, 1.8, 0),
+      new THREE.BoxGeometry(0.42, 3.4, 0.34).rotateZ(-0.14).translate(1.0, 1.7, 0),
+      new THREE.BoxGeometry(2.6, 0.38, 0.38).rotateZ(0.07).translate(-0.1, 3.55, 0),
+      new THREE.BoxGeometry(0.5, 0.4, 0.5).translate(-1.2, 0.2, 0),
+      new THREE.BoxGeometry(0.4, 0.28, 0.44).translate(1.05, 0.14, 0),
+    ]),
+    towerMaterial
+  );
+  const portal = new THREE.Mesh(new THREE.PlaneGeometry(1.7, 3.1), portalMaterial);
+  portal.position.set(-0.02, 1.75, 0);
+  frame.add(bones, portal);
+  return frame;
+}
+
+const weirdDoor = buildWeirdFrame();
+weirdDoor.position.set(WEIRD_DOOR.x, 0.12, WEIRD_DOOR.z); // floats a little
+scene.add(weirdDoor);
+COLLIDERS.push({ x: WEIRD_DOOR.x - 1.05, z: WEIRD_DOOR.z, hw: 0.25, hd: 0.25 });
+COLLIDERS.push({ x: WEIRD_DOOR.x + 1.0, z: WEIRD_DOOR.z, hw: 0.25, hd: 0.25 });
+
+// the die itself
+{
+  const s = DICE.size;
+  const die = new THREE.Mesh(new THREE.BoxGeometry(s, s, s), towerMaterial);
+  die.position.set(DICE.x, s / 2, DICE.z);
+  scene.add(die);
+
+  // pips: opposite faces sum to seven; the player stands on the one
+  const o = s / 4;
+  const pipGeometries = [];
+  const disc = () => new THREE.CylinderGeometry(1.7, 1.7, 0.3, 16);
+  const face = (spots, orient) =>
+    spots.forEach(([u, v]) => pipGeometries.push(orient(disc(), u, v)));
+  const ONE = [[0, 0]];
+  const TWO = [[-o, -o], [o, o]];
+  const THREE_ = [[-o, -o], [0, 0], [o, o]];
+  const FOUR = [[-o, -o], [-o, o], [o, -o], [o, o]];
+  const FIVE = [[-o, -o], [-o, o], [0, 0], [o, -o], [o, o]];
+  const SIX = [[-o, -o], [-o, 0], [-o, o], [o, -o], [o, 0], [o, o]];
+  face(ONE, (g, u, v) => g.translate(DICE.x + u, s + 0.1, DICE.z + v)); // top
+  face(SIX, (g, u, v) => g.translate(DICE.x + u, -0.1, DICE.z + v)); // bottom
+  face(TWO, (g, u, v) =>
+    g.rotateX(Math.PI / 2).translate(DICE.x + u, s / 2 + v, DICE.z + s / 2 + 0.1)
+  );
+  face(FIVE, (g, u, v) =>
+    g.rotateX(Math.PI / 2).translate(DICE.x + u, s / 2 + v, DICE.z - s / 2 - 0.1)
+  );
+  face(FOUR, (g, u, v) =>
+    g.rotateZ(Math.PI / 2).translate(DICE.x + s / 2 + 0.1, s / 2 + v, DICE.z + u)
+  );
+  face(THREE_, (g, u, v) =>
+    g.rotateZ(Math.PI / 2).translate(DICE.x - s / 2 - 0.1, s / 2 + v, DICE.z + u)
+  );
+  scene.add(
+    new THREE.Mesh(
+      mergeGeometries(pipGeometries),
+      new THREE.MeshBasicMaterial({ color: 0x111111 })
+    )
+  );
+
+  // the top face is walkable
+  STEP_PLATFORMS.push({
+    x: DICE.x,
+    z: DICE.z,
+    cos: 1,
+    sin: 0,
+    hw: s / 2,
+    hd: s / 2,
+    topY: s,
+  });
+}
+
+// the way home, standing on the one-pip face
+const diceExit = buildWeirdFrame();
+diceExit.position.set(DICE.x, DICE.size + 0.05, DICE.z + 7);
+scene.add(diceExit);
+
+// the axe (dice-room standard issue)
+scene.add(camera); // so the axe can ride along as a camera child
+const axePivot = new THREE.Group();
+axePivot.position.set(0.42, -0.38, -0.85);
+axePivot.rotation.set(0.12, -0.25, 0.15);
+axePivot.visible = false;
+camera.add(axePivot);
+{
+  const axe = new THREE.Group();
+  const handle = new THREE.Mesh(
+    new THREE.BoxGeometry(0.055, 0.8, 0.055),
+    new THREE.MeshStandardMaterial({ color: 0x8a5a33, fog: false })
+  );
+  handle.position.y = 0.05;
+  const steel = new THREE.MeshStandardMaterial({ color: 0xd8d8d8, fog: false });
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.17, 0.06), steel);
+  head.position.set(0.14, 0.38, 0);
+  const edge = new THREE.Mesh(
+    new THREE.BoxGeometry(0.05, 0.23, 0.062),
+    new THREE.MeshStandardMaterial({ color: 0xf2f2f2, fog: false })
+  );
+  edge.position.set(0.33, 0.38, 0);
+  axe.add(handle, head, edge);
+  axe.rotation.z = -0.15;
+  axePivot.add(axe);
+}
+
+function swingAxe() {
+  axeSwingT = 1;
+  playPartials([
+    [190, 0.07, 0.16],
+    [120, 0.05, 0.22, 0.03], // whoosh
+  ]);
+}
+
+function portalSound() {
+  playPartials([
+    [90, 0.14, 1.1],
+    [180, 0.07, 0.7, 0.05],
+    [362, 0.035, 0.5, 0.1], // not-quite-octaves; doors should be uncanny
+  ]);
+}
+
+function enterDiceWorld() {
+  diceWorldActive = true;
+  camera.position.set(DICE.x, DICE.size + EYE_HEIGHT, DICE.z - 4);
+  feetY = DICE.size;
+  grounded = true;
+  verticalVelocity = 0;
+  velocity.set(0, 0, 0);
+  axePivot.visible = true;
+  portalSound();
+}
+
+function exitDiceWorld() {
+  diceWorldActive = false;
+  // arrive on the far side of the weird door, so momentum carried
+  // through the exit walks you away from the portal, not back in
+  camera.position.set(WEIRD_DOOR.x, EYE_HEIGHT, WEIRD_DOOR.z + 2.6);
+  feetY = 0;
+  grounded = true;
+  verticalVelocity = 0;
+  velocity.set(0, 0, 0);
+  axePivot.visible = false;
+  portalSound();
+}
+
 const keyLight = new THREE.DirectionalLight(0xffffff, 2.5);
 keyLight.position.set(30, 50, 40);
 scene.add(keyLight);
@@ -2255,6 +2421,10 @@ canvas.addEventListener('click', (e) => {
   // a drag that ends on the canvas also fires "click" — don't treat it as
   // a genuine click
   if (dragMoved > 4) return;
+  if (diceWorldActive) {
+    swingAxe(); // in the dice room, a click is a swing
+    return;
+  }
   const target = clickableAt(e);
   if (!target) return;
   if (target.onClick) target.onClick();
@@ -2264,6 +2434,10 @@ canvas.addEventListener('click', (e) => {
 // pointer cursor when hovering anything readable
 document.addEventListener('mousemove', (e) => {
   if (dragging) return;
+  if (diceWorldActive) {
+    canvas.style.cursor = '';
+    return;
+  }
   canvas.style.cursor = clickableAt(e) ? 'pointer' : '';
 });
 
@@ -2338,7 +2512,7 @@ let dashBounces = 0;
 // (0) is always a candidate. Platforms are one-way: you land on tops,
 // never bump your head from below.
 function supportHeightAt(x, z, refY) {
-  let best = 0;
+  let best = x > 400 ? -Infinity : 0; // no floor in the dice void
   for (const p of STEP_PLATFORMS) {
     if (p.topY > refY || p.topY <= best) continue;
     const dx = x - p.x;
@@ -2352,10 +2526,12 @@ function supportHeightAt(x, z, refY) {
 }
 
 function collide(pos) {
-  // stay inside the sandbox walls
-  const bound = WORLD_SIZE / 2 - PLAYER_RADIUS;
-  pos.x = THREE.MathUtils.clamp(pos.x, -bound, bound);
-  pos.z = THREE.MathUtils.clamp(pos.z, -bound, bound);
+  // stay inside the sandbox walls (the dice void has no walls at all)
+  if (pos.x < 400) {
+    const bound = WORLD_SIZE / 2 - PLAYER_RADIUS;
+    pos.x = THREE.MathUtils.clamp(pos.x, -bound, bound);
+    pos.z = THREE.MathUtils.clamp(pos.z, -bound, bound);
+  }
 
   // push out of solid structures (AABB + player radius); some things
   // are only solid in the underworld
@@ -2497,6 +2673,25 @@ renderer.setAnimationLoop(() => {
     grounded = false;
   }
 
+  // the weird door: crossing it moves you somewhere else entirely
+  if (
+    !diceWorldActive &&
+    Math.abs(pos.x - WEIRD_DOOR.x) < 0.85 &&
+    Math.abs(prevZ - WEIRD_DOOR.z) < 1.5 &&
+    Math.sign(prevZ - WEIRD_DOOR.z) * Math.sign(pos.z - WEIRD_DOOR.z) < 0
+  ) {
+    enterDiceWorld();
+  } else if (
+    diceWorldActive &&
+    Math.abs(pos.x - DICE.x) < 0.85 &&
+    Math.abs(prevZ - (DICE.z + 7)) < 1.5 &&
+    Math.sign(prevZ - (DICE.z + 7)) * Math.sign(pos.z - (DICE.z + 7)) < 0
+  ) {
+    exitDiceWorld();
+  } else if (diceWorldActive && feetY < -80) {
+    exitDiceWorld(); // the void beneath the die returns lost visitors
+  }
+
   // standing on platforms: small rises step up, walking off an edge falls
   if (grounded) {
     const support = supportHeightAt(pos.x, pos.z, feetY + 0.45);
@@ -2508,8 +2703,9 @@ renderer.setAnimationLoop(() => {
     }
   }
 
-  // reaching the top of the staircase to nowhere
-  if (grounded && feetY > 22.7) {
+  // reaching the top of the staircase to nowhere (the dice top is also
+  // high, but it is very much somewhere else)
+  if (grounded && feetY > 22.7 && !diceWorldActive) {
     if (!topReached) {
       topReached = true;
       playPartials([
@@ -2693,8 +2889,11 @@ renderer.setAnimationLoop(() => {
     shard.rotation.x = t * 0.3 + i;
   });
 
-  // the miniature keeps track of you
-  miniYou.position.set(pos.x * MINI_SCALE, 0.1, pos.z * MINI_SCALE);
+  // the miniature keeps track of you (unless you've left the map —
+  // then it holds its breath where you were last seen)
+  if (!diceWorldActive) {
+    miniYou.position.set(pos.x * MINI_SCALE, 0.1, pos.z * MINI_SCALE);
+  }
   miniYou.scale.setScalar(1 + Math.sin(t * 5) * 0.25);
 
   // aurora ribbons share one clock
@@ -2755,6 +2954,23 @@ renderer.setAnimationLoop(() => {
 
   // a touched aurora settles back down
   if (auroraBurst.value > 0.01) auroraBurst.value *= Math.exp(-1.5 * delta);
+
+  // the weird door breathes; its darkness cycles very slowly
+  portalMaterial.color.setHSL((t * 0.06) % 1, 0.5, 0.13);
+  weirdDoor.rotation.z = 0.05 + Math.sin(t * 1.3) * 0.03;
+  weirdDoor.scale.setScalar(1 + Math.sin(t * 1.7) * 0.015);
+
+  // the axe: subtle idle sway, wide horizontal arc when swung
+  if (axeSwingT > 0) {
+    axeSwingT = Math.max(0, axeSwingT - delta / 0.32);
+    const p = 1 - axeSwingT;
+    axePivot.rotation.y = -0.25 - Math.sin(p * Math.PI) * 1.7;
+    axePivot.rotation.z = 0.15 + Math.sin(p * Math.PI) * 0.35;
+  } else {
+    axePivot.rotation.y = -0.25;
+    axePivot.rotation.z = 0.15;
+  }
+  axePivot.position.y = -0.38 + Math.sin(t * 2.1) * 0.01;
 
   // cerberus: three heads, three tempers, one shared spine
   for (let i = 0; i < 3; i++) {
@@ -2883,6 +3099,8 @@ if (window.location.hash === '#debug') {
       trailLive: trailAges.filter((a) => a < TRAIL_LIFE).length,
       collarShift,
       prismLightHex: prismLight.color.getHex(),
+      diceWorldActive,
+      axeSwingT: +axeSwingT.toFixed(2),
       dragonExcite: +dragonExcite.toFixed(2),
       dragonPos: dragonHead.position.toArray().map((v) => +v.toFixed(1)),
       cerberusHeadPos: cerberusHeads.map((h) =>
